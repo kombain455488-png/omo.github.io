@@ -112,6 +112,117 @@ logoutBtn.addEventListener('click', async () => {
 
 // ==================== ЧАТЫ ====================
 
+// ==================== ПОИСК ПОЛЬЗОВАТЕЛЕЙ ====================
+
+const searchInput = document.getElementById('search-users');
+const searchResults = document.getElementById('search-results');
+let searchTimeout = null;
+
+searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    const query = searchInput.value.trim();
+    
+    if (!query || !query.startsWith('@')) {
+        searchResults.classList.remove('show');
+        return;
+    }
+    
+    searchTimeout = setTimeout(async () => {
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`);
+        if (!res.ok) return;
+        
+        const data = await res.json();
+        renderSearchResults(data.users);
+    }, 300);
+});
+
+function renderSearchResults(users) {
+    searchResults.innerHTML = '';
+    
+    if (users.length === 0) {
+        searchResults.innerHTML = '<div class="no-results">Пользователи не найдены</div>';
+        searchResults.classList.add('show');
+        return;
+    }
+    
+    users.forEach(user => {
+        const div = document.createElement('div');
+        div.className = 'search-result-item';
+        
+        const usernameSpan = document.createElement('span');
+        usernameSpan.className = 'username';
+        usernameSpan.textContent = user.username;
+        
+        const actionsDiv = document.createElement('div');
+        
+        if (user.inChat) {
+            const status = document.createElement('span');
+            status.className = 'status in-chat';
+            status.textContent = 'В чате';
+            actionsDiv.appendChild(status);
+        } else {
+            const addBtn = document.createElement('button');
+            addBtn.className = 'add-btn';
+            addBtn.textContent = 'Добавить';
+            addBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                addUserToCurrentChat(user.username);
+            });
+            actionsDiv.appendChild(addBtn);
+        }
+        
+        div.appendChild(usernameSpan);
+        div.appendChild(actionsDiv);
+        searchResults.appendChild(div);
+    });
+    
+    searchResults.classList.add('show');
+}
+
+// Закрыть результаты при клике вне
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-container')) {
+        searchResults.classList.remove('show');
+    }
+});
+
+// ==================== ДОБАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯ В ЧАТ ====================
+
+async function addUserToCurrentChat(username) {
+    if (!currentChatId) {
+        alert('Сначала выберите чат, в который хотите добавить пользователя');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`/api/chats/${currentChatId}/members`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ member: username })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            alert(`✅ ${username} добавлен в чат!`);
+            searchResults.classList.remove('show');
+            searchInput.value = '';
+            await loadChats(); // Обновляем список чатов
+        } else {
+            alert(`❌ Ошибка: ${data.error}`);
+        }
+    } catch {
+        alert('❌ Ошибка при добавлении пользователя');
+    }
+}
+
+// ==================== ОБРАБОТКА WEBSOCKET СОБЫТИЙ ====================
+
+// Добавьте в функцию connectSocket():
+socket.on('user joined', (data) => {
+    console.log(`👤 ${data.username} присоединился к чату`);
+    // Обновляем список участников (можно добавить позже)
+});
+
 async function showChatPage() {
     authPage.style.display = 'none';
     chatPage.style.display = 'flex';
