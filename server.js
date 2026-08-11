@@ -124,6 +124,7 @@ function getOneQuery(sql, params = []) {
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 
 // РЕГИСТРАЦИЯ
+// РЕГИСТРАЦИЯ (исправленная)
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     
@@ -138,12 +139,16 @@ app.post('/api/register', async (req, res) => {
         }
         
         const passwordHash = await bcrypt.hash(password, 10);
-        await runQuery('INSERT INTO users (username, password_hash) VALUES (?, ?)', [username, passwordHash]);
+        // Явно указываем created_at, чтобы избежать ошибок
+        await runQuery(
+            'INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, strftime("%s", "now"))',
+            [username, passwordHash]
+        );
         
         res.json({ success: true, message: 'Регистрация успешна' });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Ошибка сервера' });
+        console.error('Ошибка регистрации:', err);
+        res.status(500).json({ error: 'Ошибка сервера при регистрации' });
     }
 });
 
