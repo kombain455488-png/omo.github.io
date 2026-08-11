@@ -7,31 +7,37 @@ const cookieParser = require('cookie-parser');
 
 const app = express();
 const server = http.createServer(app);
+
+// ==================== НАСТРОЙКИ CORS ДЛЯ КУК ====================
 const io = new Server(server, {
     cors: {
-        origin: ['http://localhost:3000', 'https://kombain455488-png.github.io'],
+        origin: [
+            'http://localhost:3000',
+            'https://kombain455488-png.github.io',
+            'https://omo.github.io'
+        ],
         methods: ['GET', 'POST'],
         credentials: true
     }
 });
 
-// Секретный ключ для JWT
-const JWT_SECRET = 'my-super-secret-key-change-it';
-
-// Хранилище в памяти (для простоты)
-const users = {}; // { username: { passwordHash, chats: [] } }
-const chats = {}; // { chatId: { name, creator, members: [], messages: [] } }
-let chatIdCounter = 1;
-
-// Настройки Express
+// ==================== НАСТРОЙКИ EXPRESS ====================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(__dirname));
 
+// ==================== СЕКРЕТНЫЙ КЛЮЧ ====================
+const JWT_SECRET = 'my-super-secret-key-change-it';
+
+// ==================== ХРАНИЛИЩЕ ====================
+const users = {};
+const chats = {};
+let chatIdCounter = 1;
+
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 
-// Регистрация
+// РЕГИСТРАЦИЯ
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     
@@ -49,7 +55,7 @@ app.post('/api/register', async (req, res) => {
     res.json({ success: true, message: 'Регистрация успешна' });
 });
 
-// Вход
+// ВХОД (С РАСШИРЕННЫМИ НАСТРОЙКАМИ ДЛЯ ТЕЛЕФОНА)
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
@@ -63,11 +69,20 @@ app.post('/api/login', async (req, res) => {
     }
     
     const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
-    res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    
+    // РАСШИРЕННЫЕ НАСТРОЙКИ КУК ДЛЯ ТЕЛЕФОНА
+    res.cookie('token', token, {
+        httpOnly: true,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        secure: true,
+        sameSite: 'none',
+        path: '/'
+    });
+    
     res.json({ success: true, username });
 });
 
-// Проверка авторизации
+// ПРОВЕРКА АВТОРИЗАЦИИ
 app.get('/api/me', (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
@@ -80,94 +95,20 @@ app.get('/api/me', (req, res) => {
     }
 });
 
-// Выход
+// ВЫХОД
 app.post('/api/logout', (req, res) => {
-    res.clearCookie('token');
+    res.clearCookie('token', {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+        path: '/'
+    });
     res.json({ success: true });
 });
 
 // ==================== ЧАТЫ ====================
 
-// ==================== ПОИСК ПОЛЬЗОВАТЕЛЕЙ ====================
-
-// Поиск пользователей по логину (с @)
-app.get('/api/users/search', (req, res) => {
-    const token = req.cookies.token;
-    if (!token) return res.status(401).json({ error: 'Не авторизован' });
-    
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const currentUser = decoded.username;
-        const query = req.query.q || '';
-        
-        // Убираем @ если есть
-        const searchTerm = query.startsWith('@') ? query.slice(1) : query;
-        
-        if (!searchTerm) {
-            return res.json({ users: [] });
-        }
-        
-        // Ищем пользователей, чей логин содержит поисковую строку (регистронезависимо)
-        const results = Object.keys(users)
-            .filter(username => 
-                username !== currentUser && // Исключаем текущего пользователя
-                username.toLowerCase().includes(searchTerm.toLowerCase())
-            )
-            .map(username => ({
-                username,
-                inChat: users[currentUser]?.chats?.some(chatId => 
-                    chats[chatId]?.members?.includes(username)
-                ) || false
-            }))
-            .slice(0, 20); // Ограничиваем до 20 результатов
-        
-        res.json({ users: results });
-    } catch {
-        res.status(401).json({ error: 'Не авторизован' });
-    }
-});
-
-// Добавить пользователя в чат
-app.post('/api/chats/:chatId/members', (req, res) => {
-    const token = req.cookies.token;
-    if (!token) return res.status(401).json({ error: 'Не авторизован' });
-    
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const username = decoded.username;
-        const chatId = parseInt(req.params.chatId);
-        const { member } = req.body;
-        
-        if (!chats[chatId]) {
-            return res.status(404).json({ error: 'Чат не найден' });
-        }
-        
-        if (!chats[chatId].members.includes(username)) {
-            return res.status(403).json({ error: 'Вы не участник этого чата' });
-        }
-        
-        if (!users[member]) {
-            return res.status(404).json({ error: 'Пользователь не найден' });
-        }
-        
-        if (chats[chatId].members.includes(member)) {
-            return res.status(400).json({ error: 'Пользователь уже в чате' });
-        }
-        
-        // Добавляем пользователя в чат
-        chats[chatId].members.push(member);
-        users[member].chats.push(chatId);
-        
-        // Уведомляем через WebSocket
-        io.to(`chat-${chatId}`).emit('user joined', { username: member });
-        
-        res.json({ success: true, message: 'Пользователь добавлен' });
-    } catch {
-        res.status(401).json({ error: 'Не авторизован' });
-    }
-});
-
-// Получить список чатов пользователя
+// ПОЛУЧИТЬ СПИСОК ЧАТОВ
 app.get('/api/chats', (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
@@ -189,7 +130,7 @@ app.get('/api/chats', (req, res) => {
     }
 });
 
-// Создать новый чат
+// СОЗДАТЬ НОВЫЙ ЧАТ
 app.post('/api/chats', (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
@@ -217,6 +158,80 @@ app.post('/api/chats', (req, res) => {
     }
 });
 
+// ==================== ПОИСК ПОЛЬЗОВАТЕЛЕЙ ====================
+
+app.get('/api/users/search', (req, res) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: 'Не авторизован' });
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const currentUser = decoded.username;
+        const query = req.query.q || '';
+        
+        const searchTerm = query.startsWith('@') ? query.slice(1) : query;
+        
+        if (!searchTerm) {
+            return res.json({ users: [] });
+        }
+        
+        const results = Object.keys(users)
+            .filter(username => 
+                username !== currentUser &&
+                username.toLowerCase().includes(searchTerm.toLowerCase())
+            )
+            .map(username => ({
+                username,
+                inChat: users[currentUser]?.chats?.some(chatId => 
+                    chats[chatId]?.members?.includes(username)
+                ) || false
+            }))
+            .slice(0, 20);
+        
+        res.json({ users: results });
+    } catch {
+        res.status(401).json({ error: 'Не авторизован' });
+    }
+});
+
+// ДОБАВИТЬ ПОЛЬЗОВАТЕЛЯ В ЧАТ
+app.post('/api/chats/:chatId/members', (req, res) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: 'Не авторизован' });
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const username = decoded.username;
+        const chatId = parseInt(req.params.chatId);
+        const { member } = req.body;
+        
+        if (!chats[chatId]) {
+            return res.status(404).json({ error: 'Чат не найден' });
+        }
+        
+        if (!chats[chatId].members.includes(username)) {
+            return res.status(403).json({ error: 'Вы не участник этого чата' });
+        }
+        
+        if (!users[member]) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        if (chats[chatId].members.includes(member)) {
+            return res.status(400).json({ error: 'Пользователь уже в чате' });
+        }
+        
+        chats[chatId].members.push(member);
+        users[member].chats.push(chatId);
+        
+        io.to(`chat-${chatId}`).emit('user joined', { username: member });
+        
+        res.json({ success: true, message: 'Пользователь добавлен' });
+    } catch {
+        res.status(401).json({ error: 'Не авторизован' });
+    }
+});
+
 // ==================== WEBSOCKET ====================
 
 io.use((socket, next) => {
@@ -236,7 +251,6 @@ io.on('connection', (socket) => {
     const username = socket.username;
     console.log(`✅ ${username} подключился`);
     
-    // Присоединиться к чату
     socket.on('join chat', (chatId) => {
         const chat = chats[chatId];
         if (!chat) return;
@@ -244,12 +258,9 @@ io.on('connection', (socket) => {
         
         socket.join(`chat-${chatId}`);
         console.log(`📌 ${username} присоединился к чату ${chatId}`);
-        
-        // Отправить историю сообщений
         socket.emit('chat history', chat.messages);
     });
     
-    // Отправить сообщение
     socket.on('chat message', ({ chatId, message }) => {
         const chat = chats[chatId];
         if (!chat) return;
