@@ -25,7 +25,6 @@ const db = new sqlite3.Database(dbPath);
 db.serialize(() => {
     console.log('🔄 Создаю таблицы...');
     
-    // Таблица users — БЕЗ created_at
     db.run(`CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password_hash TEXT NOT NULL
@@ -124,6 +123,8 @@ function getOneQuery(sql, params = []) {
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     
+    console.log('📝 Попытка регистрации:', username);
+    
     if (!username || !password) {
         return res.status(400).json({ error: 'Логин и пароль обязательны' });
     }
@@ -140,9 +141,10 @@ app.post('/api/register', async (req, res) => {
             [username, passwordHash]
         );
         
+        console.log('✅ Пользователь создан:', username);
         res.json({ success: true, message: 'Регистрация успешна' });
     } catch (err) {
-        console.error('Ошибка регистрации:', err);
+        console.error('❌ Ошибка регистрации:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
@@ -151,14 +153,23 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
+    console.log('🔑 Попытка входа:', username);
+    
+    if (!username || !password) {
+        console.log('❌ Нет логина или пароля');
+        return res.status(400).json({ error: 'Логин и пароль обязательны' });
+    }
+    
     try {
         const user = await getOneQuery('SELECT username, password_hash FROM users WHERE username = ?', [username]);
         if (!user) {
+            console.log('❌ Пользователь не найден:', username);
             return res.status(400).json({ error: 'Пользователь не найден' });
         }
         
         const valid = await bcrypt.compare(password, user.password_hash);
         if (!valid) {
+            console.log('❌ Неверный пароль для:', username);
             return res.status(400).json({ error: 'Неверный пароль' });
         }
         
@@ -172,9 +183,10 @@ app.post('/api/login', async (req, res) => {
             path: '/'
         });
         
+        console.log('✅ Успешный вход:', username);
         res.json({ success: true, username });
     } catch (err) {
-        console.error(err);
+        console.error('❌ Ошибка входа:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
@@ -393,13 +405,19 @@ app.post('/api/chats/:chatId/members', async (req, res) => {
 
 io.use((socket, next) => {
     const token = socket.handshake.auth.token;
-    if (!token) return next(new Error('Не авторизован'));
+    console.log('🔑 WebSocket токен:', token ? 'есть' : 'нет');
+    
+    if (!token) {
+        return next(new Error('Не авторизован'));
+    }
     
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         socket.username = decoded.username;
+        console.log('✅ WebSocket авторизован:', socket.username);
         next();
-    } catch {
+    } catch (err) {
+        console.error('❌ Ошибка WebSocket токена:', err);
         next(new Error('Не авторизован'));
     }
 });
