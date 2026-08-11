@@ -473,3 +473,117 @@ button:hover {
     font-size: 48px;
     margin-bottom: 12px;
 }
+
+
+/* ============ ПОИСК ПОЛЬЗОВАТЕЛЕЙ ============ */
+.search-container {
+    padding: 8px 12px;
+    position: relative;
+}
+
+.search-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 6px;
+    background: #34495e;
+    color: white;
+    font-size: 13px;
+    outline: none;
+    transition: background 0.2s;
+}
+
+.search-input::placeholder {
+    color: #95a5a6;
+}
+
+.search-input:focus {
+    background: #3d566e;
+}
+
+.search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #2c3e50;
+    border-radius: 6px;
+    margin-top: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    display: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.search-results.show {
+    display: block;
+}
+
+.search-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #34495e;
+    transition: background 0.15s;
+}
+
+.search-result-item:hover {
+    background: #34495e;
+}
+
+.search-result-item .username {
+    color: white;
+    font-size: 14px;
+}
+
+.search-result-item .username::before {
+    content: '@';
+    color: #95a5a6;
+}
+
+.search-result-item .status {
+    font-size: 12px;
+    padding: 2px 10px;
+    border-radius: 12px;
+    background: #34495e;
+    color: #95a5a6;
+}
+
+.search-result-item .status.in-chat {
+    background: #27ae60;
+    color: white;
+}
+
+.search-result-item .add-btn {
+    background: #3498db;
+    border: none;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.15s;
+}
+
+.search-result-item .add-btn:hover {
+    background: #2980b9;
+}
+
+.search-result-item .add-btn.added {
+    background: #2ecc71;
+    cursor: default;
+}
+
+.search-result-item .add-btn.added:hover {
+    background: #2ecc71;
+}
+
+.no-results {
+    padding: 12px 14px;
+    color: #95a5a6;
+    text-align: center;
+    font-size: 13px;
+}
