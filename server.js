@@ -88,6 +88,85 @@ app.post('/api/logout', (req, res) => {
 
 // ==================== ЧАТЫ ====================
 
+// ==================== ПОИСК ПОЛЬЗОВАТЕЛЕЙ ====================
+
+// Поиск пользователей по логину (с @)
+app.get('/api/users/search', (req, res) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: 'Не авторизован' });
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const currentUser = decoded.username;
+        const query = req.query.q || '';
+        
+        // Убираем @ если есть
+        const searchTerm = query.startsWith('@') ? query.slice(1) : query;
+        
+        if (!searchTerm) {
+            return res.json({ users: [] });
+        }
+        
+        // Ищем пользователей, чей логин содержит поисковую строку (регистронезависимо)
+        const results = Object.keys(users)
+            .filter(username => 
+                username !== currentUser && // Исключаем текущего пользователя
+                username.toLowerCase().includes(searchTerm.toLowerCase())
+            )
+            .map(username => ({
+                username,
+                inChat: users[currentUser]?.chats?.some(chatId => 
+                    chats[chatId]?.members?.includes(username)
+                ) || false
+            }))
+            .slice(0, 20); // Ограничиваем до 20 результатов
+        
+        res.json({ users: results });
+    } catch {
+        res.status(401).json({ error: 'Не авторизован' });
+    }
+});
+
+// Добавить пользователя в чат
+app.post('/api/chats/:chatId/members', (req, res) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: 'Не авторизован' });
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const username = decoded.username;
+        const chatId = parseInt(req.params.chatId);
+        const { member } = req.body;
+        
+        if (!chats[chatId]) {
+            return res.status(404).json({ error: 'Чат не найден' });
+        }
+        
+        if (!chats[chatId].members.includes(username)) {
+            return res.status(403).json({ error: 'Вы не участник этого чата' });
+        }
+        
+        if (!users[member]) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        
+        if (chats[chatId].members.includes(member)) {
+            return res.status(400).json({ error: 'Пользователь уже в чате' });
+        }
+        
+        // Добавляем пользователя в чат
+        chats[chatId].members.push(member);
+        users[member].chats.push(chatId);
+        
+        // Уведомляем через WebSocket
+        io.to(`chat-${chatId}`).emit('user joined', { username: member });
+        
+        res.json({ success: true, message: 'Пользователь добавлен' });
+    } catch {
+        res.status(401).json({ error: 'Не авторизован' });
+    }
+});
+
 // Получить список чатов пользователя
 app.get('/api/chats', (req, res) => {
     const token = req.cookies.token;
