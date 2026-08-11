@@ -1,3 +1,6 @@
+// ==================== АДРЕС СЕРВЕРА ====================
+const SERVER_URL = 'https://messenger-4lye.onrender.com';
+
 // ==================== СОСТОЯНИЕ ====================
 let currentUser = null;
 let currentChatId = null;
@@ -25,7 +28,7 @@ const newChatBtn = document.getElementById('new-chat-btn');
 // Проверка авторизации
 async function checkAuth() {
     try {
-        const res = await fetch('/api/me');
+        const res = await fetch(SERVER_URL + '/api/me', { credentials: 'include' });
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
@@ -39,10 +42,11 @@ document.getElementById('register-btn').addEventListener('click', async () => {
     const username = document.getElementById('register-username').value;
     const password = document.getElementById('register-password').value;
     
-    const res = await fetch('/api/register', {
+    const res = await fetch(SERVER_URL + '/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password }),
+        credentials: 'include'
     });
     
     const data = await res.json();
@@ -59,10 +63,11 @@ document.getElementById('login-btn').addEventListener('click', async () => {
     const username = document.getElementById('login-username').value;
     const password = document.getElementById('login-password').value;
     
-    const res = await fetch('/api/login', {
+    const res = await fetch(SERVER_URL + '/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password }),
+        credentials: 'include'
     });
     
     const data = await res.json();
@@ -100,7 +105,7 @@ function showLoginForm() {
 
 // Выход
 logoutBtn.addEventListener('click', async () => {
-    await fetch('/api/logout', { method: 'POST' });
+    await fetch(SERVER_URL + '/api/logout', { method: 'POST', credentials: 'include' });
     if (socket) socket.disconnect();
     currentUser = null;
     currentChatId = null;
@@ -111,6 +116,149 @@ logoutBtn.addEventListener('click', async () => {
 });
 
 // ==================== ЧАТЫ ====================
+
+async function showChatPage() {
+    authPage.style.display = 'none';
+    chatPage.style.display = 'flex';
+    currentUserSpan.textContent = currentUser;
+    
+    connectSocket();
+    await loadChats();
+}
+
+function connectSocket() {
+    if (socket) socket.disconnect();
+    
+    const token = document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
+    
+    socket = io(SERVER_URL, {
+        auth: { token }
+    });
+    
+    socket.on('connect', () => {
+        console.log('🔌 WebSocket подключён');
+    });
+    
+    socket.on('chat message', (msg) => {
+        renderMessage(msg, false);
+    });
+    
+    socket.on('chat history', (messages) => {
+        chatHistory = messages;
+        messagesDiv.innerHTML = '';
+        messages.forEach(msg => renderMessage(msg, false));
+    });
+    
+    socket.on('disconnect', () => {
+        console.log('🔌 WebSocket отключён');
+    });
+}
+
+async function loadChats() {
+    const res = await fetch(SERVER_URL + '/api/chats', { credentials: 'include' });
+    if (!res.ok) return;
+    
+    const chats = await res.json();
+    renderChatList(chats);
+}
+
+function renderChatList(chats) {
+    chatList.innerHTML = '';
+    
+    if (chats.length === 0) {
+        chatList.innerHTML = '<div class="empty-state">📭 Нет чатов.<br>Создайте новый!</div>';
+        return;
+    }
+    
+    chats.forEach(chat => {
+        const div = document.createElement('div');
+        div.className = 'chat-item';
+        if (chat.id === currentChatId) div.classList.add('active');
+        
+        div.innerHTML = `
+            <div class="chat-item-name">${chat.name}</div>
+            <div class="chat-item-members">👥 ${chat.members.length} участников</div>
+        `;
+        
+        div.addEventListener('click', () => joinChat(chat.id, chat.name));
+        chatList.appendChild(div);
+    });
+}
+
+function joinChat(chatId, name) {
+    currentChatId = chatId;
+    chatName.textContent = name;
+    
+    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+    const items = document.querySelectorAll('.chat-item');
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].textContent.includes(name)) {
+            items[i].classList.add('active');
+            break;
+        }
+    }
+    
+    if (socket) {
+        socket.emit('join chat', chatId);
+    }
+    
+    messageInput.disabled = false;
+    sendBtn.disabled = false;
+    messageInput.focus();
+}
+
+// ==================== СОЗДАНИЕ ЧАТА ====================
+
+newChatBtn.addEventListener('click', () => {
+    console.log('➕ Нажата кнопка создания чата');
+    modal.classList.add('show');
+    newChatName.value = '';
+    newChatName.focus();
+});
+
+modalCancelBtn.addEventListener('click', () => {
+    modal.classList.remove('show');
+});
+
+createChatBtn.addEventListener('click', async () => {
+    const name = newChatName.value.trim();
+    if (!name) {
+        alert('Введите название чата');
+        return;
+    }
+    
+    console.log('📤 Создаю чат:', name);
+    
+    try {
+        const res = await fetch(SERVER_URL + '/api/chats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+            credentials: 'include'
+        });
+        
+        const data = await res.json();
+        console.log('📨 Ответ сервера:', data);
+        
+        if (res.ok) {
+            modal.classList.remove('show');
+            await loadChats();
+        } else {
+            alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+        }
+    } catch (err) {
+        console.error('❌ Ошибка создания чата:', err);
+        alert('❌ Ошибка подключения к серверу');
+    }
+});
+
+modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.remove('show');
+});
+
+newChatName.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') createChatBtn.click();
+});
 
 // ==================== ПОИСК ПОЛЬЗОВАТЕЛЕЙ ====================
 
@@ -128,7 +276,7 @@ searchInput.addEventListener('input', () => {
     }
     
     searchTimeout = setTimeout(async () => {
-        const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(SERVER_URL + `/api/users/search?q=${encodeURIComponent(query)}`, { credentials: 'include' });
         if (!res.ok) return;
         
         const data = await res.json();
@@ -179,7 +327,6 @@ function renderSearchResults(users) {
     searchResults.classList.add('show');
 }
 
-// Закрыть результаты при клике вне
 document.addEventListener('click', (e) => {
     if (!e.target.closest('.search-container')) {
         searchResults.classList.remove('show');
@@ -195,10 +342,11 @@ async function addUserToCurrentChat(username) {
     }
     
     try {
-        const res = await fetch(`/api/chats/${currentChatId}/members`, {
+        const res = await fetch(SERVER_URL + `/api/chats/${currentChatId}/members`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ member: username })
+            body: JSON.stringify({ member: username }),
+            credentials: 'include'
         });
         
         const data = await res.json();
@@ -206,7 +354,7 @@ async function addUserToCurrentChat(username) {
             alert(`✅ ${username} добавлен в чат!`);
             searchResults.classList.remove('show');
             searchInput.value = '';
-            await loadChats(); // Обновляем список чатов
+            await loadChats();
         } else {
             alert(`❌ Ошибка: ${data.error}`);
         }
@@ -215,160 +363,18 @@ async function addUserToCurrentChat(username) {
     }
 }
 
-// ==================== ОБРАБОТКА WEBSOCKET СОБЫТИЙ ====================
-
-// Добавьте в функцию connectSocket():
-socket.on('user joined', (data) => {
-    console.log(`👤 ${data.username} присоединился к чату`);
-    // Обновляем список участников (можно добавить позже)
-});
-
-async function showChatPage() {
-    authPage.style.display = 'none';
-    chatPage.style.display = 'flex';
-    currentUserSpan.textContent = currentUser;
-    
-    // Подключаем WebSocket
-    connectSocket();
-    
-    // Загружаем чаты
-    await loadChats();
-}
-
-function connectSocket() {
-    if (socket) socket.disconnect();
-    
-    const token = document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
-    
-    socket = io({
-        auth: { token }
-    });
-    
-    socket.on('connect', () => {
-        console.log('🔌 WebSocket подключён');
-    });
-    
-    socket.on('chat message', (msg) => {
-        renderMessage(msg, false);
-    });
-    
-    socket.on('chat history', (messages) => {
-        chatHistory = messages;
-        messagesDiv.innerHTML = '';
-        messages.forEach(msg => renderMessage(msg, false));
-    });
-    
-    socket.on('disconnect', () => {
-        console.log('🔌 WebSocket отключён');
-    });
-}
-
-async function loadChats() {
-    const res = await fetch('/api/chats');
-    if (!res.ok) return;
-    
-    const chats = await res.json();
-    renderChatList(chats);
-}
-
-function renderChatList(chats) {
-    chatList.innerHTML = '';
-    
-    if (chats.length === 0) {
-        chatList.innerHTML = '<div class="empty-state">📭 Нет чатов.<br>Создайте новый!</div>';
-        return;
-    }
-    
-    chats.forEach(chat => {
-        const div = document.createElement('div');
-        div.className = 'chat-item';
-        if (chat.id === currentChatId) div.classList.add('active');
-        
-        div.innerHTML = `
-            <div class="chat-item-name">${chat.name}</div>
-            <div class="chat-item-members">👥 ${chat.members.length} участников</div>
-        `;
-        
-        div.addEventListener('click', () => joinChat(chat.id, chat.name));
-        chatList.appendChild(div);
-    });
-}
-
-function joinChat(chatId, name) {
-    currentChatId = chatId;
-    chatName.textContent = name;
-    
-    // Обновляем активный чат в списке
-    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
-    const items = document.querySelectorAll('.chat-item');
-    for (let i = 0; i < items.length; i++) {
-        if (items[i].textContent.includes(name)) {
-            items[i].classList.add('active');
-            break;
-        }
-    }
-    
-    // Присоединяемся к чату через Socket
-    if (socket) {
-        socket.emit('join chat', chatId);
-    }
-    
-    // Активируем ввод
-    messageInput.disabled = false;
-    sendBtn.disabled = false;
-    messageInput.focus();
-}
-
-// Создание нового чата
-newChatBtn.addEventListener('click', () => {
-    modal.classList.add('show');
-    newChatName.value = '';
-    newChatName.focus();
-});
-
-modalCancelBtn.addEventListener('click', () => {
-    modal.classList.remove('show');
-});
-
-createChatBtn.addEventListener('click', async () => {
-    const name = newChatName.value.trim();
-    if (!name) return;
-    
-    const res = await fetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-    });
-    
-    if (res.ok) {
-        modal.classList.remove('show');
-        await loadChats();
-    } else {
-        alert('Ошибка создания чата');
-    }
-});
-
-// Закрыть модалку по клику вне
-modal.addEventListener('click', (e) => {
-    if (e.target === modal) modal.classList.remove('show');
-});
-
-// Enter в поле создания чата
-newChatName.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') createChatBtn.click();
-});
-
 // ==================== СООБЩЕНИЯ ====================
 
 function renderMessage(msg, isOwn) {
     const div = document.createElement('div');
     div.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
     
-    const time = new Date(msg.timestamp).toLocaleTimeString();
+    const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
+    const from = isOwn ? 'Вы' : (msg.username || msg.from || 'Неизвестный');
     
     div.innerHTML = `
         <div>${msg.text}</div>
-        <div class="message-info">${isOwn ? 'Вы' : msg.from} • ${time}</div>
+        <div class="message-info">${from} • ${time}</div>
     `;
     
     messagesDiv.appendChild(div);
@@ -381,25 +387,21 @@ function sendMessage() {
     const text = messageInput.value.trim();
     if (!text) return;
     
-    // Отправляем на сервер
     socket.emit('chat message', { chatId: currentChatId, message: text });
-    
-    // Показываем у себя
-    renderMessage({
-        from: currentUser,
-        text: text,
-        timestamp: Date.now()
-    }, true);
-    
     messageInput.value = '';
 }
 
-// Отправка по Enter
 messageInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
 });
 
 sendBtn.addEventListener('click', sendMessage);
+
+// ==================== WEBSOCKET СОБЫТИЯ ====================
+// Добавляем обработчик для Socket.IO (добавьте в connectSocket)
+// socket.on('user joined', (data) => {
+//     console.log(`👤 ${data.username} присоединился к чату`);
+// });
 
 // ==================== ЗАПУСК ====================
 checkAuth();
