@@ -158,6 +158,32 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// ==================== АДМИН-ПАНЕЛЬ (только для просмотра) ====================
+app.get('/api/admin/users', async (req, res) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: 'Не авторизован' });
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        // Только создатель (админ) может смотреть
+        if (decoded.username !== 'admin') {
+            return res.status(403).json({ error: 'Доступ запрещён' });
+        }
+        
+        const users = await getQuery('SELECT username, created_at FROM users ORDER BY created_at DESC');
+        const chats = await getQuery('SELECT id, name, creator, created_at FROM chats ORDER BY created_at DESC');
+        const messages = await getQuery('SELECT COUNT(*) as total FROM messages');
+        
+        res.json({
+            users: users,
+            chats: chats,
+            total_messages: messages[0]?.total || 0
+        });
+    } catch {
+        res.status(401).json({ error: 'Не авторизован' });
+    }
+});
+
 // ПРОВЕРКА АВТОРИЗАЦИИ
 app.get('/api/me', (req, res) => {
     const token = req.cookies.token;
