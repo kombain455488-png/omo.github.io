@@ -4,11 +4,54 @@ const { Server } = require('socket.io');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 
-// ==================== НАСТРОЙКИ CORS ДЛЯ КУК ====================
+// ==================== ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ ====================
+// Файл messenger.db будет создан автоматически в папке проекта
+const db = new sqlite3.Database(path.join(__dirname, 'messenger.db'));
+
+// Создаём таблицы (если их нет)
+db.serialize(() => {
+    // Таблица пользователей
+    db.run(`CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL
+    )`);
+    
+    // Таблица чатов
+    db.run(`CREATE TABLE IF NOT EXISTS chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        creator TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    )`);
+    
+    // Таблица участников чатов
+    db.run(`CREATE TABLE IF NOT EXISTS chat_members (
+        chat_id INTEGER,
+        username TEXT,
+        PRIMARY KEY (chat_id, username),
+        FOREIGN KEY (chat_id) REFERENCES chats(id),
+        FOREIGN KEY (username) REFERENCES users(username)
+    )`);
+    
+    // Таблица сообщений
+    db.run(`CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER,
+        username TEXT,
+        text TEXT NOT NULL,
+        timestamp INTEGER DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY (chat_id) REFERENCES chats(id),
+        FOREIGN KEY (username) REFERENCES users(username)
+    )`);
+});
+
+// ==================== НАСТРОЙКИ CORS ====================
 const io = new Server(server, {
     cors: {
         origin: [
@@ -21,19 +64,41 @@ const io = new Server(server, {
     }
 });
 
-// ==================== НАСТРОЙКИ EXPRESS ====================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(__dirname));
 
-// ==================== СЕКРЕТНЫЙ КЛЮЧ ====================
 const JWT_SECRET = 'my-super-secret-key-change-it';
 
-// ==================== ХРАНИЛИЩЕ ====================
-const users = {};
-const chats = {};
-let chatIdCounter = 1;
+// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД ====================
+// Упрощают выполнение запросов
+function runQuery(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.run(sql, params, function(err) {
+            if (err) reject(err);
+            else resolve(this);
+        });
+    });
+}
+
+function getQuery(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.all(sql, params, (err, rows) => {
+            if (err) reject(err);
+            else resolve(rows);
+        });
+    });
+}
+
+function getOneQuery(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.get(sql, params, (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+        });
+    });
+}
 
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 
@@ -45,41 +110,52 @@ app.post('/api/register', async (req, res) => {
         return res.status(400).json({ error: 'Логин и пароль обязательны' });
     }
     
-    if (users[username]) {
-        return res.status(400).json({ error: 'Пользователь уже существует' });
+    try {
+        const existing = await getOneQuery('SELECT username FROM users WHERE username = ?', [username]);
+        if (existing) {
+            return res.status(400).json({ error: 'Пользователь уже существует' });
+        }
+        
+        const passwordHash = await bcrypt.hash(password, 10);
+        await runQuery('INSERT INTO users (username, password_hash) VALUES (?, ?)', [username, passwordHash]);
+        
+        res.json({ success: true, message: 'Регистрация успешна' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
-    
-    const passwordHash = await bcrypt.hash(password, 10);
-    users[username] = { passwordHash, chats: [] };
-    
-    res.json({ success: true, message: 'Регистрация успешна' });
 });
 
-// ВХОД (С РАСШИРЕННЫМИ НАСТРОЙКАМИ ДЛЯ ТЕЛЕФОНА)
+// ВХОД
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
-    if (!users[username]) {
-        return res.status(400).json({ error: 'Пользователь не найден' });
+    try {
+        const user = await getOneQuery('SELECT username, password_hash FROM users WHERE username = ?', [username]);
+        if (!user) {
+            return res.status(400).json({ error: 'Пользователь не найден' });
+        }
+        
+        const valid = await bcrypt.compare(password, user.password_hash);
+        if (!valid) {
+            return res.status(400).json({ error: 'Неверный пароль' });
+        }
+        
+        const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
+        
+        res.cookie('token', token, {
+            httpOnly: true,
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            secure: true,
+            sameSite: 'none',
+            path: '/'
+        });
+        
+        res.json({ success: true, username });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
-    
-    const valid = await bcrypt.compare(password, users[username].passwordHash);
-    if (!valid) {
-        return res.status(400).json({ error: 'Неверный пароль' });
-    }
-    
-    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
-    
-    // РАСШИРЕННЫЕ НАСТРОЙКИ КУК ДЛЯ ТЕЛЕФОНА
-    res.cookie('token', token, {
-        httpOnly: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        secure: true,
-        sameSite: 'none',
-        path: '/'
-    });
-    
-    res.json({ success: true, username });
 });
 
 // ПРОВЕРКА АВТОРИЗАЦИИ
@@ -109,7 +185,7 @@ app.post('/api/logout', (req, res) => {
 // ==================== ЧАТЫ ====================
 
 // ПОЛУЧИТЬ СПИСОК ЧАТОВ
-app.get('/api/chats', (req, res) => {
+app.get('/api/chats', async (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
     
@@ -117,21 +193,32 @@ app.get('/api/chats', (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const username = decoded.username;
         
-        const userChats = users[username]?.chats || [];
-        const chatList = userChats.map(id => ({
-            id,
-            name: chats[id]?.name || 'Без названия',
-            members: chats[id]?.members || []
+        const chats = await getQuery(`
+            SELECT c.id, c.name, 
+                   GROUP_CONCAT(cm.username) as members
+            FROM chats c
+            JOIN chat_members cm ON c.id = cm.chat_id
+            WHERE c.id IN (
+                SELECT chat_id FROM chat_members WHERE username = ?
+            )
+            GROUP BY c.id, c.name
+        `, [username]);
+        
+        const result = chats.map(c => ({
+            id: c.id,
+            name: c.name,
+            members: c.members ? c.members.split(',') : []
         }));
         
-        res.json(chatList);
-    } catch {
-        res.status(401).json({ error: 'Не авторизован' });
+        res.json(result);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
 // СОЗДАТЬ НОВЫЙ ЧАТ
-app.post('/api/chats', (req, res) => {
+app.post('/api/chats', async (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
     
@@ -142,25 +229,27 @@ app.post('/api/chats', (req, res) => {
         
         if (!name) return res.status(400).json({ error: 'Имя чата обязательно' });
         
-        const chatId = chatIdCounter++;
-        chats[chatId] = {
-            name,
-            creator: username,
-            members: [username],
-            messages: []
-        };
+        const result = await runQuery(
+            'INSERT INTO chats (name, creator) VALUES (?, ?)',
+            [name, username]
+        );
+        const chatId = result.lastID;
         
-        users[username].chats.push(chatId);
+        await runQuery(
+            'INSERT INTO chat_members (chat_id, username) VALUES (?, ?)',
+            [chatId, username]
+        );
         
         res.json({ success: true, chatId });
-    } catch {
-        res.status(401).json({ error: 'Не авторизован' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
 // ==================== ПОИСК ПОЛЬЗОВАТЕЛЕЙ ====================
 
-app.get('/api/users/search', (req, res) => {
+app.get('/api/users/search', async (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
     
@@ -175,27 +264,40 @@ app.get('/api/users/search', (req, res) => {
             return res.json({ users: [] });
         }
         
-        const results = Object.keys(users)
-            .filter(username => 
-                username !== currentUser &&
-                username.toLowerCase().includes(searchTerm.toLowerCase())
-            )
-            .map(username => ({
-                username,
-                inChat: users[currentUser]?.chats?.some(chatId => 
-                    chats[chatId]?.members?.includes(username)
-                ) || false
-            }))
-            .slice(0, 20);
+        const users = await getQuery(
+            `SELECT username FROM users 
+             WHERE username != ? AND LOWER(username) LIKE LOWER(?) 
+             LIMIT 20`,
+            [currentUser, `%${searchTerm}%`]
+        );
+        
+        const chatIds = await getQuery(
+            'SELECT chat_id FROM chat_members WHERE username = ?',
+            [currentUser]
+        );
+        const userChatIds = chatIds.map(c => c.chat_id);
+        
+        const results = await Promise.all(users.map(async (user) => {
+            const inChat = await getOneQuery(
+                `SELECT 1 FROM chat_members 
+                 WHERE username = ? AND chat_id IN (${userChatIds.length ? userChatIds.join(',') : '0'})`,
+                [user.username]
+            );
+            return {
+                username: user.username,
+                inChat: !!inChat
+            };
+        }));
         
         res.json({ users: results });
-    } catch {
-        res.status(401).json({ error: 'Не авторизован' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
 // ДОБАВИТЬ ПОЛЬЗОВАТЕЛЯ В ЧАТ
-app.post('/api/chats/:chatId/members', (req, res) => {
+app.post('/api/chats/:chatId/members', async (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
     
@@ -205,30 +307,38 @@ app.post('/api/chats/:chatId/members', (req, res) => {
         const chatId = parseInt(req.params.chatId);
         const { member } = req.body;
         
-        if (!chats[chatId]) {
-            return res.status(404).json({ error: 'Чат не найден' });
-        }
-        
-        if (!chats[chatId].members.includes(username)) {
-            return res.status(403).json({ error: 'Вы не участник этого чата' });
-        }
-        
-        if (!users[member]) {
+        const userExists = await getOneQuery('SELECT username FROM users WHERE username = ?', [member]);
+        if (!userExists) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
         
-        if (chats[chatId].members.includes(member)) {
+        const existing = await getOneQuery(
+            'SELECT 1 FROM chat_members WHERE chat_id = ? AND username = ?',
+            [chatId, member]
+        );
+        if (existing) {
             return res.status(400).json({ error: 'Пользователь уже в чате' });
         }
         
-        chats[chatId].members.push(member);
-        users[member].chats.push(chatId);
+        const isMember = await getOneQuery(
+            'SELECT 1 FROM chat_members WHERE chat_id = ? AND username = ?',
+            [chatId, username]
+        );
+        if (!isMember) {
+            return res.status(403).json({ error: 'Вы не участник этого чата' });
+        }
+        
+        await runQuery(
+            'INSERT INTO chat_members (chat_id, username) VALUES (?, ?)',
+            [chatId, member]
+        );
         
         io.to(`chat-${chatId}`).emit('user joined', { username: member });
         
         res.json({ success: true, message: 'Пользователь добавлен' });
-    } catch {
-        res.status(401).json({ error: 'Не авторизован' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
@@ -251,29 +361,50 @@ io.on('connection', (socket) => {
     const username = socket.username;
     console.log(`✅ ${username} подключился`);
     
-    socket.on('join chat', (chatId) => {
-        const chat = chats[chatId];
-        if (!chat) return;
-        if (!chat.members.includes(username)) return;
-        
-        socket.join(`chat-${chatId}`);
-        console.log(`📌 ${username} присоединился к чату ${chatId}`);
-        socket.emit('chat history', chat.messages);
+    socket.on('join chat', async (chatId) => {
+        try {
+            const isMember = await getOneQuery(
+                'SELECT 1 FROM chat_members WHERE chat_id = ? AND username = ?',
+                [chatId, username]
+            );
+            if (!isMember) return;
+            
+            socket.join(`chat-${chatId}`);
+            console.log(`📌 ${username} присоединился к чату ${chatId}`);
+            
+            const messages = await getQuery(
+                'SELECT username, text, timestamp FROM messages WHERE chat_id = ? ORDER BY timestamp ASC LIMIT 100',
+                [chatId]
+            );
+            socket.emit('chat history', messages);
+        } catch (err) {
+            console.error('Ошибка join chat:', err);
+        }
     });
     
-    socket.on('chat message', ({ chatId, message }) => {
-        const chat = chats[chatId];
-        if (!chat) return;
-        if (!chat.members.includes(username)) return;
-        
-        const msg = {
-            from: username,
-            text: message,
-            timestamp: Date.now()
-        };
-        
-        chat.messages.push(msg);
-        io.to(`chat-${chatId}`).emit('chat message', msg);
+    socket.on('chat message', async ({ chatId, message }) => {
+        try {
+            const isMember = await getOneQuery(
+                'SELECT 1 FROM chat_members WHERE chat_id = ? AND username = ?',
+                [chatId, username]
+            );
+            if (!isMember) return;
+            
+            const msg = {
+                username: username,
+                text: message,
+                timestamp: Math.floor(Date.now() / 1000)
+            };
+            
+            await runQuery(
+                'INSERT INTO messages (chat_id, username, text, timestamp) VALUES (?, ?, ?, ?)',
+                [chatId, username, message, msg.timestamp]
+            );
+            
+            io.to(`chat-${chatId}`).emit('chat message', msg);
+        } catch (err) {
+            console.error('Ошибка отправки сообщения:', err);
+        }
     });
     
     socket.on('disconnect', () => {
@@ -286,6 +417,5 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
-    console.log(`👥 Пользователей: ${Object.keys(users).length}`);
-    console.log(`💬 Чатов: ${Object.keys(chats).length}`);
+    console.log(`✅ База данных: ${path.join(__dirname, 'messenger.db')}`);
 });
