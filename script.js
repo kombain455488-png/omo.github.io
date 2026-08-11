@@ -131,15 +131,22 @@ function connectSocket() {
     
     const token = document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
     
+    // ВАЖНО: добавляем SERVER_URL
     socket = io(SERVER_URL, {
-        auth: { token }
+        auth: { token },
+        withCredentials: true
     });
     
     socket.on('connect', () => {
         console.log('🔌 WebSocket подключён');
     });
     
+    socket.on('connect_error', (error) => {
+        console.error('❌ Ошибка WebSocket:', error);
+    });
+    
     socket.on('chat message', (msg) => {
+        console.log('📩 Получено сообщение от сервера:', msg);
         renderMessage(msg, false);
     });
     
