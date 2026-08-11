@@ -34,7 +34,9 @@ async function checkAuth() {
             currentUser = data.username;
             showChatPage();
         }
-    } catch {}
+    } catch (err) {
+        console.error('❌ Ошибка checkAuth:', err);
+    }
 }
 
 // Регистрация
@@ -42,40 +44,69 @@ document.getElementById('register-btn').addEventListener('click', async () => {
     const username = document.getElementById('register-username').value;
     const password = document.getElementById('register-password').value;
     
-    const res = await fetch(SERVER_URL + '/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-        credentials: 'include'
-    });
+    if (!username || !password) {
+        showAuthError('Заполните все поля');
+        return;
+    }
     
-    const data = await res.json();
-    if (data.success) {
-        showLoginForm();
-        showAuthError('Регистрация успешна! Теперь войдите.');
-    } else {
-        showAuthError(data.error);
+    try {
+        const res = await fetch(SERVER_URL + '/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+            credentials: 'include'
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            showLoginForm();
+            showAuthError('✅ Регистрация успешна! Теперь войдите.');
+        } else {
+            showAuthError('❌ ' + (data.error || 'Ошибка регистрации'));
+        }
+    } catch (err) {
+        console.error('❌ Ошибка регистрации:', err);
+        showAuthError('❌ Ошибка подключения к серверу');
     }
 });
 
-// Вход
+// ВХОД (исправленная версия)
 document.getElementById('login-btn').addEventListener('click', async () => {
     const username = document.getElementById('login-username').value;
     const password = document.getElementById('login-password').value;
     
-    const res = await fetch(SERVER_URL + '/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-        credentials: 'include'
-    });
+    if (!username || !password) {
+        showAuthError('Заполните все поля');
+        return;
+    }
     
-    const data = await res.json();
-    if (data.success) {
-        currentUser = data.username;
-        showChatPage();
-    } else {
-        showAuthError(data.error);
+    console.log('📤 Отправка запроса на вход для:', username);
+    console.log('📤 Данные:', JSON.stringify({ username, password }));
+    
+    try {
+        const res = await fetch(SERVER_URL + '/api/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, password }),
+            credentials: 'include'
+        });
+        
+        console.log('📨 Статус ответа:', res.status);
+        const data = await res.json();
+        console.log('📦 Данные ответа:', data);
+        
+        if (data.success) {
+            currentUser = data.username;
+            console.log('✅ Вход выполнен успешно');
+            showChatPage();
+        } else {
+            showAuthError('❌ ' + (data.error || 'Ошибка входа'));
+        }
+    } catch (err) {
+        console.error('❌ Ошибка при входе:', err);
+        showAuthError('❌ Ошибка подключения к серверу');
     }
 });
 
@@ -121,7 +152,6 @@ async function showChatPage() {
     authPage.style.display = 'none';
     chatPage.style.display = 'flex';
     currentUserSpan.textContent = currentUser;
-    
     connectSocket();
     await loadChats();
 }
@@ -129,11 +159,30 @@ async function showChatPage() {
 function connectSocket() {
     if (socket) socket.disconnect();
     
+    // Получаем токен из кук
     const token = document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
     
-    // ВАЖНО: добавляем SERVER_URL
+    console.log('🔑 Токен для WebSocket:', token ? 'есть' : 'нет');
+    
+    if (!token) {
+        console.error('❌ Токен не найден в куках');
+        // Пробуем получить токен через /api/me
+        fetch(SERVER_URL + '/api/me', { credentials: 'include' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.username) {
+                    console.log('✅ Пользователь авторизован:', data.username);
+                    // Повторно подключаемся
+                    connectSocket();
+                }
+            })
+            .catch(() => {});
+        return;
+    }
+    
     socket = io(SERVER_URL, {
         auth: { token },
+        transports: ['websocket', 'polling'],
         withCredentials: true
     });
     
@@ -146,7 +195,7 @@ function connectSocket() {
     });
     
     socket.on('chat message', (msg) => {
-        console.log('📩 Получено сообщение от сервера:', msg);
+        console.log('📩 Получено сообщение:', msg);
         renderMessage(msg, false);
     });
     
@@ -162,11 +211,18 @@ function connectSocket() {
 }
 
 async function loadChats() {
-    const res = await fetch(SERVER_URL + '/api/chats', { credentials: 'include' });
-    if (!res.ok) return;
-    
-    const chats = await res.json();
-    renderChatList(chats);
+    try {
+        const res = await fetch(SERVER_URL + '/api/chats', { credentials: 'include' });
+        if (!res.ok) {
+            console.error('❌ Ошибка загрузки чатов:', res.status);
+            return;
+        }
+        
+        const chats = await res.json();
+        renderChatList(chats);
+    } catch (err) {
+        console.error('❌ Ошибка loadChats:', err);
+    }
 }
 
 function renderChatList(chats) {
@@ -283,11 +339,15 @@ searchInput.addEventListener('input', () => {
     }
     
     searchTimeout = setTimeout(async () => {
-        const res = await fetch(SERVER_URL + `/api/users/search?q=${encodeURIComponent(query)}`, { credentials: 'include' });
-        if (!res.ok) return;
-        
-        const data = await res.json();
-        renderSearchResults(data.users);
+        try {
+            const res = await fetch(SERVER_URL + `/api/users/search?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+            if (!res.ok) return;
+            
+            const data = await res.json();
+            renderSearchResults(data.users);
+        } catch (err) {
+            console.error('❌ Ошибка поиска:', err);
+        }
     }, 300);
 });
 
@@ -365,8 +425,9 @@ async function addUserToCurrentChat(username) {
         } else {
             alert(`❌ Ошибка: ${data.error}`);
         }
-    } catch {
-        alert('❌ Ошибка при добавлении пользователя');
+    } catch (err) {
+        console.error('❌ Ошибка добавления пользователя:', err);
+        alert('❌ Ошибка подключения к серверу');
     }
 }
 
@@ -378,10 +439,8 @@ function renderMessage(msg, isOwn) {
     const div = document.createElement('div');
     div.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
     
-    // Безопасно получаем имя отправителя
     const from = isOwn ? 'Вы' : (msg.username || msg.from || 'Неизвестный');
     
-    // Безопасно получаем время
     let time = 'только что';
     if (msg.timestamp) {
         const date = new Date(msg.timestamp * 1000);
@@ -410,10 +469,8 @@ function sendMessage() {
     
     console.log('📤 Отправляю сообщение в чат', currentChatId, ':', text);
     
-    // Отправляем на сервер
     socket.emit('chat message', { chatId: currentChatId, message: text });
     
-    // Показываем у себя
     renderMessage({
         username: currentUser,
         text: text,
@@ -423,5 +480,17 @@ function sendMessage() {
     messageInput.value = '';
 }
 
+messageInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+});
+
+sendBtn.addEventListener('click', sendMessage);
+
+// ==================== WEBSOCKET СОБЫТИЯ ====================
+// socket.on('user joined', (data) => {
+//     console.log(`👤 ${data.username} присоединился к чату`);
+// });
+
 // ==================== ЗАПУСК ====================
+console.log('🚀 Запуск мессенджера...');
 checkAuth();
