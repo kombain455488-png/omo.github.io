@@ -6,40 +6,58 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 
-// ==================== ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ ====================
-// Файл messenger.db будет создан автоматически в папке проекта
-const db = new sqlite3.Database(path.join(__dirname, 'messenger.db'));
+// ==================== ПРИНУДИТЕЛЬНОЕ СОЗДАНИЕ БАЗЫ ====================
+const dbPath = path.join(__dirname, 'messenger.db');
+console.log(`📁 Путь к базе данных: ${dbPath}`);
 
-// Создаём таблицы (если их нет)
+// Проверяем, существует ли файл
+if (!fs.existsSync(dbPath)) {
+    console.log('⚠️ База данных не найдена. Создаём новую...');
+    fs.writeFileSync(dbPath, '');
+}
+
+// Подключаемся к базе
+const db = new sqlite3.Database(dbPath);
+
+// Принудительно создаём таблицы
 db.serialize(() => {
-    // Таблица пользователей
+    console.log('🔄 Создаю таблицы...');
+    
     db.run(`CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
-        password_hash TEXT NOT NULL
-    )`);
+        password_hash TEXT NOT NULL,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    )`, (err) => {
+        if (err) console.error('❌ Ошибка users:', err.message);
+        else console.log('✅ Таблица users создана');
+    });
     
-    // Таблица чатов
     db.run(`CREATE TABLE IF NOT EXISTS chats (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         creator TEXT NOT NULL,
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    )`);
+    )`, (err) => {
+        if (err) console.error('❌ Ошибка chats:', err.message);
+        else console.log('✅ Таблица chats создана');
+    });
     
-    // Таблица участников чатов
     db.run(`CREATE TABLE IF NOT EXISTS chat_members (
         chat_id INTEGER,
         username TEXT,
         PRIMARY KEY (chat_id, username),
         FOREIGN KEY (chat_id) REFERENCES chats(id),
         FOREIGN KEY (username) REFERENCES users(username)
-    )`);
+    )`, (err) => {
+        if (err) console.error('❌ Ошибка chat_members:', err.message);
+        else console.log('✅ Таблица chat_members создана');
+    });
     
-    // Таблица сообщений
     db.run(`CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chat_id INTEGER,
@@ -48,7 +66,10 @@ db.serialize(() => {
         timestamp INTEGER DEFAULT (strftime('%s', 'now')),
         FOREIGN KEY (chat_id) REFERENCES chats(id),
         FOREIGN KEY (username) REFERENCES users(username)
-    )`);
+    )`, (err) => {
+        if (err) console.error('❌ Ошибка messages:', err.message);
+        else console.log('✅ Таблица messages создана');
+    });
 });
 
 // ==================== НАСТРОЙКИ CORS ====================
@@ -57,7 +78,8 @@ const io = new Server(server, {
         origin: [
             'http://localhost:3000',
             'https://kombain455488-png.github.io',
-            'https://omo.github.io'
+            'https://omo.github.io',
+            'https://messenger-4lye.onrender.com'
         ],
         methods: ['GET', 'POST'],
         credentials: true
@@ -71,8 +93,7 @@ app.use(express.static(__dirname));
 
 const JWT_SECRET = 'my-super-secret-key-change-it';
 
-// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД ====================
-// Упрощают выполнение запросов
+// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 function runQuery(sql, params = []) {
     return new Promise((resolve, reject) => {
         db.run(sql, params, function(err) {
@@ -158,32 +179,6 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// ==================== АДМИН-ПАНЕЛЬ (только для просмотра) ====================
-app.get('/api/admin/users', async (req, res) => {
-    const token = req.cookies.token;
-    if (!token) return res.status(401).json({ error: 'Не авторизован' });
-    
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        // Только создатель (админ) может смотреть
-        if (decoded.username !== 'admin') {
-            return res.status(403).json({ error: 'Доступ запрещён' });
-        }
-        
-        const users = await getQuery('SELECT username, created_at FROM users ORDER BY created_at DESC');
-        const chats = await getQuery('SELECT id, name, creator, created_at FROM chats ORDER BY created_at DESC');
-        const messages = await getQuery('SELECT COUNT(*) as total FROM messages');
-        
-        res.json({
-            users: users,
-            chats: chats,
-            total_messages: messages[0]?.total || 0
-        });
-    } catch {
-        res.status(401).json({ error: 'Не авторизован' });
-    }
-});
-
 // ПРОВЕРКА АВТОРИЗАЦИИ
 app.get('/api/me', (req, res) => {
     const token = req.cookies.token;
@@ -206,6 +201,31 @@ app.post('/api/logout', (req, res) => {
         path: '/'
     });
     res.json({ success: true });
+});
+
+// ==================== АДМИН-ПАНЕЛЬ ====================
+app.get('/api/admin/users', async (req, res) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: 'Не авторизован' });
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.username !== 'admin') {
+            return res.status(403).json({ error: 'Доступ запрещён' });
+        }
+        
+        const users = await getQuery('SELECT username, created_at FROM users ORDER BY created_at DESC');
+        const chats = await getQuery('SELECT id, name, creator, created_at FROM chats ORDER BY created_at DESC');
+        const messages = await getQuery('SELECT COUNT(*) as total FROM messages');
+        
+        res.json({
+            users: users,
+            chats: chats,
+            total_messages: messages[0]?.total || 0
+        });
+    } catch {
+        res.status(401).json({ error: 'Не авторизован' });
+    }
 });
 
 // ==================== ЧАТЫ ====================
@@ -443,5 +463,5 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
-    console.log(`✅ База данных: ${path.join(__dirname, 'messenger.db')}`);
+    console.log(`✅ База данных: ${dbPath}`);
 });
