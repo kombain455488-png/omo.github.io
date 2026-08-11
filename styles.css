@@ -85,3 +85,391 @@ button {
 button:hover {
     background: #0056b3;
 }
+
+/* ============ АВТОРИЗАЦИЯ ============ */
+#auth-page {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.auth-container {
+    background: white;
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    width: 360px;
+    max-width: 95%;
+}
+
+.auth-container h1 {
+    text-align: center;
+    color: #333;
+    margin-bottom: 24px;
+}
+
+.auth-container h2 {
+    color: #555;
+    margin-bottom: 16px;
+    font-size: 18px;
+}
+
+.auth-container input {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.auth-container button {
+    width: 100%;
+    padding: 12px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.auth-container button:hover {
+    background: #5a6fd6;
+}
+
+.auth-container p {
+    text-align: center;
+    margin-top: 16px;
+    color: #666;
+    font-size: 14px;
+}
+
+.auth-container a {
+    color: #667eea;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.auth-container a:hover {
+    text-decoration: underline;
+}
+
+.error-message {
+    color: #e74c3c;
+    text-align: center;
+    font-size: 14px;
+    min-height: 24px;
+    margin-bottom: 12px;
+}
+
+/* ============ ОСНОВНОЙ ЧАТ ============ */
+#chat-page {
+    display: none;
+    height: 100vh;
+}
+
+#chat-container {
+    display: flex;
+    height: 100vh;
+}
+
+/* ============ САЙДБАР (список чатов) ============ */
+#sidebar {
+    width: 280px;
+    background: #2c3e50;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid #34495e;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sidebar-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.btn-new-chat {
+    background: #3498db;
+    border: none;
+    color: white;
+    font-size: 22px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-new-chat:hover {
+    background: #2980b9;
+}
+
+#chat-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.chat-item {
+    padding: 12px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    transition: background 0.2s;
+}
+
+.chat-item:hover {
+    background: #34495e;
+}
+
+.chat-item.active {
+    background: #34495e;
+}
+
+.chat-item-name {
+    font-weight: 500;
+}
+
+.chat-item-members {
+    font-size: 12px;
+    color: #95a5a6;
+}
+
+.sidebar-footer {
+    padding: 16px;
+    border-top: 1px solid #34495e;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+}
+
+.btn-logout {
+    background: #e74c3c;
+    border: none;
+    color: white;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.btn-logout:hover {
+    background: #c0392b;
+}
+
+/* ============ ОБЛАСТЬ ЧАТА ============ */
+#main-chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #f5f6fa;
+}
+
+#chat-header {
+    padding: 16px 24px;
+    background: white;
+    border-bottom: 1px solid #ddd;
+}
+
+#chat-header h2 {
+    margin: 0;
+    font-size: 18px;
+    color: #333;
+}
+
+#messages {
+    flex: 1;
+    padding: 20px 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    background: #f5f6fa;
+}
+
+#messages .message {
+    max-width: 70%;
+    padding: 10px 16px;
+    border-radius: 18px;
+    margin-bottom: 8px;
+    word-wrap: break-word;
+}
+
+#messages .message-own {
+    background: #667eea;
+    color: white;
+    align-self: flex-end;
+}
+
+#messages .message-other {
+    background: white;
+    color: #333;
+    align-self: flex-start;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+
+#messages .message-info {
+    font-size: 12px;
+    color: #999;
+    margin-top: 4px;
+}
+
+#messages .message-other .message-info {
+    color: #999;
+}
+
+#messages .message-own .message-info {
+    color: rgba(255,255,255,0.7);
+}
+
+#input-area {
+    display: flex;
+    padding: 16px 24px;
+    background: white;
+    border-top: 1px solid #ddd;
+    gap: 12px;
+}
+
+#input-area input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid #ddd;
+    border-radius: 24px;
+    outline: none;
+    font-size: 14px;
+}
+
+#input-area input:focus {
+    border-color: #667eea;
+}
+
+#input-area button {
+    padding: 12px 28px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 24px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+#input-area button:hover {
+    background: #5a6fd6;
+}
+
+#input-area button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* ============ МОДАЛЬНОЕ ОКНО ============ */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    justify-content: center;
+    align-items: center;
+}
+
+.modal.show {
+    display: flex;
+}
+
+.modal-content {
+    background: white;
+    padding: 32px;
+    border-radius: 16px;
+    width: 360px;
+    max-width: 95%;
+}
+
+.modal-content h2 {
+    margin-top: 0;
+    color: #333;
+}
+
+.modal-content input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.modal-actions button {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+#create-chat-btn {
+    background: #667eea;
+    color: white;
+}
+
+#create-chat-btn:hover {
+    background: #5a6fd6;
+}
+
+#modal-cancel-btn {
+    background: #e74c3c;
+    color: white;
+}
+
+#modal-cancel-btn:hover {
+    background: #c0392b;
+}
+
+/* ============ АДАПТИВ ============ */
+@media (max-width: 600px) {
+    #sidebar {
+        width: 200px;
+    }
+    
+    .auth-container {
+        padding: 24px;
+    }
+    
+    #messages .message {
+        max-width: 85%;
+    }
+}
+
+/* Пустое состояние */
+.empty-state {
+    text-align: center;
+    color: #999;
+    padding: 40px 20px;
+    font-size: 16px;
+}
+
+.empty-state .icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
