@@ -366,15 +366,26 @@ async function addUserToCurrentChat(username) {
 // ==================== СООБЩЕНИЯ ====================
 
 function renderMessage(msg, isOwn) {
+    console.log('📩 Рендер сообщения:', msg, 'isOwn:', isOwn);
+    
     const div = document.createElement('div');
     div.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
     
-    const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
+    // Безопасно получаем имя отправителя
     const from = isOwn ? 'Вы' : (msg.username || msg.from || 'Неизвестный');
     
+    // Безопасно получаем время
+    let time = 'только что';
+    if (msg.timestamp) {
+        const date = new Date(msg.timestamp * 1000);
+        if (!isNaN(date.getTime())) {
+            time = date.toLocaleTimeString();
+        }
+    }
+    
     div.innerHTML = `
-        <div>${msg.text}</div>
-        <div class="message-info">${from} • ${time}</div>
+        <div><strong>${from}</strong>: ${msg.text}</div>
+        <div class="message-info">${time}</div>
     `;
     
     messagesDiv.appendChild(div);
@@ -382,26 +393,28 @@ function renderMessage(msg, isOwn) {
 }
 
 function sendMessage() {
-    if (!currentChatId || !socket) return;
+    if (!currentChatId || !socket) {
+        console.warn('⚠️ Нет чата или сокета');
+        return;
+    }
     
     const text = messageInput.value.trim();
     if (!text) return;
     
+    console.log('📤 Отправляю сообщение в чат', currentChatId, ':', text);
+    
+    // Отправляем на сервер
     socket.emit('chat message', { chatId: currentChatId, message: text });
+    
+    // Показываем у себя
+    renderMessage({
+        username: currentUser,
+        text: text,
+        timestamp: Math.floor(Date.now() / 1000)
+    }, true);
+    
     messageInput.value = '';
 }
-
-messageInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') sendMessage();
-});
-
-sendBtn.addEventListener('click', sendMessage);
-
-// ==================== WEBSOCKET СОБЫТИЯ ====================
-// Добавляем обработчик для Socket.IO (добавьте в connectSocket)
-// socket.on('user joined', (data) => {
-//     console.log(`👤 ${data.username} присоединился к чату`);
-// });
 
 // ==================== ЗАПУСК ====================
 checkAuth();
