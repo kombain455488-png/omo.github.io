@@ -1,4 +1,4 @@
-﻿const socket = io('http://localhost:3000');
+﻿const socket = io('https://messenger-4lye.onrender.com');
 
 socket.on('chat message', (msg) => {
     const messagesDiv = document.getElementById('messages');
