@@ -35,17 +35,30 @@
     <div id="chat-page" style="display:none">
         <div id="chat-container">
             <!-- Список чатов -->
+
+
+
+            <!-- Список чатов -->
             <div id="sidebar">
                 <div class="sidebar-header">
                     <h3>💬 Чаты</h3>
                     <button id="new-chat-btn" class="btn-new-chat">+</button>
                 </div>
+                
+                <!-- ПОИСК ПОЛЬЗОВАТЕЛЕЙ -->
+                <div class="search-container">
+                    <input type="text" id="search-users" placeholder="Поиск пользователей (например, @username)" class="search-input">
+                    <div id="search-results" class="search-results"></div>
+                </div>
+                
                 <div id="chat-list"></div>
                 <div class="sidebar-footer">
                     <span id="current-user"></span>
                     <button id="logout-btn" class="btn-logout">🚪 Выйти</button>
                 </div>
             </div>
+    
+                
             
             <!-- Область чата -->
             <div id="main-chat">
