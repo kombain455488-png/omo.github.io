@@ -25,6 +25,7 @@ const db = new sqlite3.Database(dbPath);
 db.serialize(() => {
     console.log('🔄 Создаю таблицы...');
     
+    // ============ ТАБЛИЦА USERS ============
     db.run(`CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password_hash TEXT NOT NULL
@@ -68,26 +69,13 @@ db.serialize(() => {
     });
 });
 
-// ==================== НАСТРОЙКИ CORS ====================
-const io = new Server(server, {
-    cors: {
-        origin: [
-            'http://localhost:3000',
-            'https://kombain455488-png.github.io',
-            'https://omo.github.io',
-            'https://messenger-4lye.onrender.com'
-        ],
-        methods: ['GET', 'POST'],
-        credentials: true
-    }
-});
-
+// ==================== НАСТРОЙКИ EXPRESS ====================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(__dirname));
 
-// ==================== НАСТРОЙКИ CORS (MIDDLEWARE) ====================
+// ==================== НАСТРОЙКИ CORS ====================
 app.use((req, res, next) => {
     const allowedOrigins = [
         'http://localhost:3000',
@@ -103,11 +91,24 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     
-    // Обрабатываем preflight запросы
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
     next();
+});
+
+// ==================== WEBSOCKET CORS ====================
+const io = new Server(server, {
+    cors: {
+        origin: [
+            'http://localhost:3000',
+            'https://kombain455488-png.github.io',
+            'https://omo.github.io',
+            'https://messenger-4lye.onrender.com'
+        ],
+        methods: ['GET', 'POST'],
+        credentials: true
+    }
 });
 
 const JWT_SECRET = 'my-super-secret-key-change-it';
@@ -153,18 +154,22 @@ app.post('/api/register', async (req, res) => {
     }
     
     try {
+        // Проверяем, существует ли пользователь
         const existing = await getOneQuery('SELECT username FROM users WHERE username = ?', [username]);
         if (existing) {
             return res.status(400).json({ error: 'Пользователь уже существует' });
         }
         
+        // Хешируем пароль
         const passwordHash = await bcrypt.hash(password, 10);
+        
+        // СОХРАНЯЕМ В БАЗУ ДАННЫХ
         await runQuery(
             'INSERT INTO users (username, password_hash) VALUES (?, ?)',
             [username, passwordHash]
         );
         
-        console.log('✅ Пользователь создан:', username);
+        console.log('✅ Пользователь создан и сохранён в БД:', username);
         res.json({ success: true, message: 'Регистрация успешна' });
     } catch (err) {
         console.error('❌ Ошибка регистрации:', err);
@@ -172,7 +177,7 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
-// ВХОД (возвращаем токен в теле ответа)
+// ВХОД
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
@@ -183,19 +188,21 @@ app.post('/api/login', async (req, res) => {
     }
     
     try {
+        // Ищем пользователя в БД
         const user = await getOneQuery('SELECT username, password_hash FROM users WHERE username = ?', [username]);
         if (!user) {
+            console.log('❌ Пользователь не найден в БД:', username);
             return res.status(400).json({ error: 'Пользователь не найден' });
         }
         
         const valid = await bcrypt.compare(password, user.password_hash);
         if (!valid) {
+            console.log('❌ Неверный пароль для:', username);
             return res.status(400).json({ error: 'Неверный пароль' });
         }
         
         const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
         
-        // Отправляем токен и в куке, и в теле ответа
         res.cookie('token', token, {
             httpOnly: true,
             maxAge: 7 * 24 * 60 * 60 * 1000,
@@ -204,16 +211,24 @@ app.post('/api/login', async (req, res) => {
             path: '/'
         });
         
-        // ВОЗВРАЩАЕМ ТОКЕН В ТЕЛЕ ОТВЕТА
+        console.log('✅ Успешный вход:', username);
         res.json({ success: true, username, token });
     } catch (err) {
         console.error('❌ Ошибка входа:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
+
 // ПРОВЕРКА АВТОРИЗАЦИИ
 app.get('/api/me', (req, res) => {
-    const token = req.cookies.token;
+    let token = req.cookies.token;
+    if (!token) {
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            token = authHeader.slice(7);
+        }
+    }
+    
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
     
     try {
