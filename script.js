@@ -481,4 +481,96 @@ sendBtn.addEventListener('click', sendMessage);
 
 // ==================== ЗАПУСК ====================
 console.log('🚀 Запуск мессенджера...');
+
+// ==================== ВОССТАНОВЛЕНИЕ ПАРОЛЯ ====================
+
+const resetForm = document.getElementById('reset-form');
+const resetEmail = document.getElementById('reset-email');
+const resetCode = document.getElementById('reset-code');
+const resetNewPassword = document.getElementById('reset-new-password');
+const resetSendCodeBtn = document.getElementById('reset-send-code-btn');
+const resetConfirmBtn = document.getElementById('reset-confirm-btn');
+const resetBackToLogin = document.getElementById('reset-back-to-login');
+const resetError = document.getElementById('reset-error');
+const resetStep1 = document.getElementById('reset-step-1');
+const resetStep2 = document.getElementById('reset-step-2');
+
+// Показать форму восстановления (ссылка "Забыли пароль?")
+document.getElementById('show-reset').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('login-form').style.display = 'none';
+    resetForm.style.display = 'block';
+    resetStep1.style.display = 'block';
+    resetStep2.style.display = 'none';
+    resetError.textContent = '';
+});
+
+// Назад к входу
+resetBackToLogin.addEventListener('click', (e) => {
+    e.preventDefault();
+    resetForm.style.display = 'none';
+    document.getElementById('login-form').style.display = 'block';
+    resetError.textContent = '';
+});
+
+// Отправить код на email
+resetSendCodeBtn.addEventListener('click', async () => {
+    const email = resetEmail.value.trim();
+    if (!email) {
+        resetError.textContent = 'Введите email';
+        return;
+    }
+    
+    try {
+        const res = await fetch(SERVER_URL + '/api/forgot-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            resetStep1.style.display = 'none';
+            resetStep2.style.display = 'block';
+            resetError.textContent = '✅ Код отправлен на ваш email';
+        } else {
+            resetError.textContent = '❌ ' + (data.error || 'Ошибка');
+        }
+    } catch {
+        resetError.textContent = '❌ Ошибка подключения к серверу';
+    }
+});
+
+// Подтвердить смену пароля
+resetConfirmBtn.addEventListener('click', async () => {
+    const email = resetEmail.value.trim();
+    const code = resetCode.value.trim();
+    const newPassword = resetNewPassword.value.trim();
+    
+    if (!code || !newPassword) {
+        resetError.textContent = 'Заполните все поля';
+        return;
+    }
+    
+    try {
+        const res = await fetch(SERVER_URL + '/api/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code, newPassword })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            resetError.textContent = '✅ Пароль изменён! Войдите с новым паролем.';
+            resetStep2.style.display = 'none';
+            resetForm.style.display = 'none';
+            document.getElementById('login-form').style.display = 'block';
+        } else {
+            resetError.textContent = '❌ ' + (data.error || 'Ошибка');
+        }
+    } catch {
+        resetError.textContent = '❌ Ошибка подключения к серверу';
+    }
+});
+
 checkAuth();
