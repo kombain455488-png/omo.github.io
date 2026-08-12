@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const server = http.createServer(app);
@@ -25,10 +26,13 @@ const db = new sqlite3.Database(dbPath);
 db.serialize(() => {
     console.log('🔄 Создаю таблицы...');
     
-    // ============ ТАБЛИЦА USERS ============
+    // ============ ТАБЛИЦА USERS (с email) ============
     db.run(`CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
-        password_hash TEXT NOT NULL
+        password_hash TEXT NOT NULL,
+        email TEXT,
+        reset_code TEXT,
+        reset_code_expires INTEGER
     )`, (err) => {
         if (err) console.error('❌ Ошибка users:', err.message);
         else console.log('✅ Таблица users создана');
@@ -113,6 +117,18 @@ const io = new Server(server, {
 
 const JWT_SECRET = 'my-super-secret-key-change-it';
 
+// ==================== НАСТРОЙКИ EMAIL ====================
+// Для теста используем ethereal.email (бесплатный фейковый SMTP)
+// Замените на реальные данные для отправки писем
+const transporter = nodemailer.createTransport({
+    host: 'smtp.ethereal.email',
+    port: 587,
+    auth: {
+        user: 'your-ethereal-email@ethereal.email',
+        pass: 'your-ethereal-password'
+    }
+});
+
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 function runQuery(sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -143,33 +159,30 @@ function getOneQuery(sql, params = []) {
 
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 
-// РЕГИСТРАЦИЯ
+// РЕГИСТРАЦИЯ (с email)
 app.post('/api/register', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password, email } = req.body;
     
-    console.log('📝 Попытка регистрации:', username);
+    console.log('📝 Попытка регистрации:', username, email);
     
     if (!username || !password) {
         return res.status(400).json({ error: 'Логин и пароль обязательны' });
     }
     
     try {
-        // Проверяем, существует ли пользователь
         const existing = await getOneQuery('SELECT username FROM users WHERE username = ?', [username]);
         if (existing) {
             return res.status(400).json({ error: 'Пользователь уже существует' });
         }
         
-        // Хешируем пароль
         const passwordHash = await bcrypt.hash(password, 10);
         
-        // СОХРАНЯЕМ В БАЗУ ДАННЫХ
         await runQuery(
-            'INSERT INTO users (username, password_hash) VALUES (?, ?)',
-            [username, passwordHash]
+            'INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)',
+            [username, passwordHash, email || null]
         );
         
-        console.log('✅ Пользователь создан и сохранён в БД:', username);
+        console.log('✅ Пользователь создан:', username);
         res.json({ success: true, message: 'Регистрация успешна' });
     } catch (err) {
         console.error('❌ Ошибка регистрации:', err);
@@ -188,16 +201,13 @@ app.post('/api/login', async (req, res) => {
     }
     
     try {
-        // Ищем пользователя в БД
         const user = await getOneQuery('SELECT username, password_hash FROM users WHERE username = ?', [username]);
         if (!user) {
-            console.log('❌ Пользователь не найден в БД:', username);
             return res.status(400).json({ error: 'Пользователь не найден' });
         }
         
         const valid = await bcrypt.compare(password, user.password_hash);
         if (!valid) {
-            console.log('❌ Неверный пароль для:', username);
             return res.status(400).json({ error: 'Неверный пароль' });
         }
         
@@ -211,7 +221,6 @@ app.post('/api/login', async (req, res) => {
             path: '/'
         });
         
-        console.log('✅ Успешный вход:', username);
         res.json({ success: true, username, token });
     } catch (err) {
         console.error('❌ Ошибка входа:', err);
@@ -250,6 +259,81 @@ app.post('/api/logout', (req, res) => {
     res.json({ success: true });
 });
 
+// ==================== ВОССТАНОВЛЕНИЕ ПАРОЛЯ ====================
+
+// ЗАПРОС ВОССТАНОВЛЕНИЯ (отправляем код на email)
+app.post('/api/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    
+    if (!email) {
+        return res.status(400).json({ error: 'Email обязателен' });
+    }
+    
+    try {
+        const user = await getOneQuery('SELECT username FROM users WHERE email = ?', [email]);
+        if (!user) {
+            return res.status(404).json({ error: 'Пользователь с таким email не найден' });
+        }
+        
+        // Генерируем 6-значный код
+        const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 час
+        
+        await runQuery(
+            'UPDATE users SET reset_code = ?, reset_code_expires = ? WHERE email = ?',
+            [resetCode, expiresAt, email]
+        );
+        
+        // Отправляем email
+        const mailOptions = {
+            from: 'noreply@messenger.com',
+            to: email,
+            subject: 'Восстановление пароля в Мессенджере',
+            text: `Ваш код для восстановления пароля: ${resetCode}\nКод действителен 1 час.`
+        };
+        
+        await transporter.sendMail(mailOptions);
+        console.log(`📧 Код отправлен на ${email}: ${resetCode}`);
+        
+        res.json({ success: true, message: 'Код отправлен на email' });
+    } catch (err) {
+        console.error('❌ Ошибка восстановления:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// ПРОВЕРКА КОДА И СМЕНА ПАРОЛЯ
+app.post('/api/reset-password', async (req, res) => {
+    const { email, code, newPassword } = req.body;
+    
+    if (!email || !code || !newPassword) {
+        return res.status(400).json({ error: 'Все поля обязательны' });
+    }
+    
+    try {
+        const user = await getOneQuery(
+            'SELECT username FROM users WHERE email = ? AND reset_code = ? AND reset_code_expires > ?',
+            [email, code, Math.floor(Date.now() / 1000)]
+        );
+        
+        if (!user) {
+            return res.status(400).json({ error: 'Неверный код или код истёк' });
+        }
+        
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+        await runQuery(
+            'UPDATE users SET password_hash = ?, reset_code = NULL, reset_code_expires = NULL WHERE email = ?',
+            [passwordHash, email]
+        );
+        
+        console.log(`✅ Пароль обновлён для ${user.username}`);
+        res.json({ success: true, message: 'Пароль успешно изменён' });
+    } catch (err) {
+        console.error('❌ Ошибка сброса пароля:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
 // ==================== АДМИН-ПАНЕЛЬ ====================
 app.get('/api/admin/users', async (req, res) => {
     const token = req.cookies.token;
@@ -261,7 +345,7 @@ app.get('/api/admin/users', async (req, res) => {
             return res.status(403).json({ error: 'Доступ запрещён' });
         }
         
-        const users = await getQuery('SELECT username FROM users ORDER BY username');
+        const users = await getQuery('SELECT username, email FROM users ORDER BY username');
         const chats = await getQuery('SELECT id, name, creator FROM chats ORDER BY id DESC');
         const messages = await getQuery('SELECT COUNT(*) as total FROM messages');
         
