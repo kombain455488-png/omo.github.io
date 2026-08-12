@@ -159,24 +159,12 @@ async function showChatPage() {
 function connectSocket() {
     if (socket) socket.disconnect();
     
-    // Получаем токен из кук
-    const token = document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
-    
+    // Берём токен из localStorage
+    const token = localStorage.getItem('token');
     console.log('🔑 Токен для WebSocket:', token ? 'есть' : 'нет');
     
     if (!token) {
-        console.error('❌ Токен не найден в куках');
-        // Пробуем получить токен через /api/me
-        fetch(SERVER_URL + '/api/me', { credentials: 'include' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.username) {
-                    console.log('✅ Пользователь авторизован:', data.username);
-                    // Повторно подключаемся
-                    connectSocket();
-                }
-            })
-            .catch(() => {});
+        console.error('❌ Токен не найден в localStorage');
         return;
     }
     
