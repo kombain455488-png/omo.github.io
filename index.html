@@ -29,6 +29,22 @@
                 <p>Уже есть аккаунт? <a href="#" id="show-login">Войти</a></p>
             </div>
         </div>
+        <!-- ВОССТАНОВЛЕНИЕ ПАРОЛЯ -->
+        <div id="reset-form" style="display:none">
+            <h2>🔐 Восстановление пароля</h2>
+            <div id="reset-error" class="error-message"></div>
+            <div id="reset-step-1">
+                <input type="email" id="reset-email" placeholder="Введите email">
+                <button id="reset-send-code-btn">Отправить код</button>
+                <p><a href="#" id="reset-back-to-login">← Назад к входу</a></p>
+            </div>
+            <div id="reset-step-2" style="display:none">
+                <p>Код отправлен на email</p>
+                <input type="text" id="reset-code" placeholder="Введите код из письма">
+                <input type="password" id="reset-new-password" placeholder="Новый пароль">
+                <button id="reset-confirm-btn">Сменить пароль</button>
+            </div>
+        </div>
     </div>
 
     <!-- СТРАНИЦА ЧАТА -->
