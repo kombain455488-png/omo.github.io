@@ -22,30 +22,46 @@ const newChatName = document.getElementById('new-chat-name');
 const createChatBtn = document.getElementById('create-chat-btn');
 const modalCancelBtn = document.getElementById('modal-cancel-btn');
 const newChatBtn = document.getElementById('new-chat-btn');
+const searchInput = document.getElementById('search-users');
+const searchResults = document.getElementById('search-results');
 
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 
-// Проверка авторизации
+// Проверка авторизации (из localStorage)
 async function checkAuth() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    
     try {
-        const res = await fetch(SERVER_URL + '/api/me', { credentials: 'include' });
+        const res = await fetch(SERVER_URL + '/api/me', {
+            headers: { 'Authorization': 'Bearer ' + token },
+            credentials: 'include'
+        });
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
             showChatPage();
+        } else {
+            localStorage.removeItem('token');
         }
     } catch (err) {
         console.error('❌ Ошибка checkAuth:', err);
     }
 }
 
-// Регистрация
+// РЕГИСТРАЦИЯ (с email)
 document.getElementById('register-btn').addEventListener('click', async () => {
     const username = document.getElementById('register-username').value;
     const password = document.getElementById('register-password').value;
+    const email = document.getElementById('register-email').value;
     
     if (!username || !password) {
-        showAuthError('Заполните все поля');
+        showAuthError('Заполните логин и пароль');
+        return;
+    }
+    
+    if (email && !email.includes('@')) {
+        showAuthError('Введите корректный email');
         return;
     }
     
@@ -53,7 +69,7 @@ document.getElementById('register-btn').addEventListener('click', async () => {
         const res = await fetch(SERVER_URL + '/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
+            body: JSON.stringify({ username, password, email }),
             credentials: 'include'
         });
         
@@ -70,7 +86,7 @@ document.getElementById('register-btn').addEventListener('click', async () => {
     }
 });
 
-// ВХОД (исправленная версия)
+// ВХОД (сохраняем токен в localStorage)
 document.getElementById('login-btn').addEventListener('click', async () => {
     const username = document.getElementById('login-username').value;
     const password = document.getElementById('login-password').value;
@@ -81,25 +97,24 @@ document.getElementById('login-btn').addEventListener('click', async () => {
     }
     
     console.log('📤 Отправка запроса на вход для:', username);
-    console.log('📤 Данные:', JSON.stringify({ username, password }));
     
     try {
         const res = await fetch(SERVER_URL + '/api/login', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),
             credentials: 'include'
         });
         
-        console.log('📨 Статус ответа:', res.status);
         const data = await res.json();
         console.log('📦 Данные ответа:', data);
         
-        if (data.success) {
+        if (data.success && data.token) {
+            // СОХРАНЯЕМ ТОКЕН В localStorage
+            localStorage.setItem('token', data.token);
+            console.log('✅ Токен сохранён в localStorage');
+            
             currentUser = data.username;
-            console.log('✅ Вход выполнен успешно');
             showChatPage();
         } else {
             showAuthError('❌ ' + (data.error || 'Ошибка входа'));
@@ -137,6 +152,7 @@ function showLoginForm() {
 // Выход
 logoutBtn.addEventListener('click', async () => {
     await fetch(SERVER_URL + '/api/logout', { method: 'POST', credentials: 'include' });
+    localStorage.removeItem('token');
     if (socket) socket.disconnect();
     currentUser = null;
     currentChatId = null;
@@ -146,20 +162,11 @@ logoutBtn.addEventListener('click', async () => {
     messagesDiv.innerHTML = '';
 });
 
-// ==================== ЧАТЫ ====================
-
-async function showChatPage() {
-    authPage.style.display = 'none';
-    chatPage.style.display = 'flex';
-    currentUserSpan.textContent = currentUser;
-    connectSocket();
-    await loadChats();
-}
+// ==================== WEBSOCKET ====================
 
 function connectSocket() {
     if (socket) socket.disconnect();
     
-    // Берём токен из localStorage
     const token = localStorage.getItem('token');
     console.log('🔑 Токен для WebSocket:', token ? 'есть' : 'нет');
     
@@ -198,9 +205,21 @@ function connectSocket() {
     });
 }
 
+async function showChatPage() {
+    authPage.style.display = 'none';
+    chatPage.style.display = 'flex';
+    currentUserSpan.textContent = currentUser;
+    connectSocket();
+    await loadChats();
+}
+
 async function loadChats() {
     try {
-        const res = await fetch(SERVER_URL + '/api/chats', { credentials: 'include' });
+        const token = localStorage.getItem('token');
+        const res = await fetch(SERVER_URL + '/api/chats', {
+            headers: { 'Authorization': 'Bearer ' + token },
+            credentials: 'include'
+        });
         if (!res.ok) {
             console.error('❌ Ошибка загрузки чатов:', res.status);
             return;
@@ -281,9 +300,13 @@ createChatBtn.addEventListener('click', async () => {
     console.log('📤 Создаю чат:', name);
     
     try {
+        const token = localStorage.getItem('token');
         const res = await fetch(SERVER_URL + '/api/chats', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
             body: JSON.stringify({ name }),
             credentials: 'include'
         });
@@ -313,8 +336,6 @@ newChatName.addEventListener('keypress', (e) => {
 
 // ==================== ПОИСК ПОЛЬЗОВАТЕЛЕЙ ====================
 
-const searchInput = document.getElementById('search-users');
-const searchResults = document.getElementById('search-results');
 let searchTimeout = null;
 
 searchInput.addEventListener('input', () => {
@@ -328,7 +349,11 @@ searchInput.addEventListener('input', () => {
     
     searchTimeout = setTimeout(async () => {
         try {
-            const res = await fetch(SERVER_URL + `/api/users/search?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+            const token = localStorage.getItem('token');
+            const res = await fetch(SERVER_URL + `/api/users/search?q=${encodeURIComponent(query)}`, {
+                headers: { 'Authorization': 'Bearer ' + token },
+                credentials: 'include'
+            });
             if (!res.ok) return;
             
             const data = await res.json();
@@ -397,9 +422,13 @@ async function addUserToCurrentChat(username) {
     }
     
     try {
+        const token = localStorage.getItem('token');
         const res = await fetch(SERVER_URL + `/api/chats/${currentChatId}/members`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
             body: JSON.stringify({ member: username }),
             credentials: 'include'
         });
@@ -474,14 +503,6 @@ messageInput.addEventListener('keypress', (e) => {
 
 sendBtn.addEventListener('click', sendMessage);
 
-// ==================== WEBSOCKET СОБЫТИЯ ====================
-// socket.on('user joined', (data) => {
-//     console.log(`👤 ${data.username} присоединился к чату`);
-// });
-
-// ==================== ЗАПУСК ====================
-console.log('🚀 Запуск мессенджера...');
-
 // ==================== ВОССТАНОВЛЕНИЕ ПАРОЛЯ ====================
 
 const resetForm = document.getElementById('reset-form');
@@ -495,17 +516,18 @@ const resetError = document.getElementById('reset-error');
 const resetStep1 = document.getElementById('reset-step-1');
 const resetStep2 = document.getElementById('reset-step-2');
 
-// Показать форму восстановления (ссылка "Забыли пароль?")
-document.getElementById('show-reset').addEventListener('click', (e) => {
-    e.preventDefault();
-    document.getElementById('login-form').style.display = 'none';
-    resetForm.style.display = 'block';
-    resetStep1.style.display = 'block';
-    resetStep2.style.display = 'none';
-    resetError.textContent = '';
-});
+// Показать форму восстановления
+if (document.getElementById('show-reset')) {
+    document.getElementById('show-reset').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('login-form').style.display = 'none';
+        resetForm.style.display = 'block';
+        resetStep1.style.display = 'block';
+        resetStep2.style.display = 'none';
+        resetError.textContent = '';
+    });
+}
 
-// Назад к входу
 resetBackToLogin.addEventListener('click', (e) => {
     e.preventDefault();
     resetForm.style.display = 'none';
@@ -513,7 +535,6 @@ resetBackToLogin.addEventListener('click', (e) => {
     resetError.textContent = '';
 });
 
-// Отправить код на email
 resetSendCodeBtn.addEventListener('click', async () => {
     const email = resetEmail.value.trim();
     if (!email) {
@@ -541,7 +562,6 @@ resetSendCodeBtn.addEventListener('click', async () => {
     }
 });
 
-// Подтвердить смену пароля
 resetConfirmBtn.addEventListener('click', async () => {
     const email = resetEmail.value.trim();
     const code = resetCode.value.trim();
@@ -573,4 +593,6 @@ resetConfirmBtn.addEventListener('click', async () => {
     }
 });
 
+// ==================== ЗАПУСК ====================
+console.log('🚀 Запуск мессенджера...');
 checkAuth();
