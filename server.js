@@ -172,32 +172,30 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
-// ВХОД
+// ВХОД (возвращаем токен в теле ответа)
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
     console.log('🔑 Попытка входа:', username);
     
     if (!username || !password) {
-        console.log('❌ Нет логина или пароля');
         return res.status(400).json({ error: 'Логин и пароль обязательны' });
     }
     
     try {
         const user = await getOneQuery('SELECT username, password_hash FROM users WHERE username = ?', [username]);
         if (!user) {
-            console.log('❌ Пользователь не найден:', username);
             return res.status(400).json({ error: 'Пользователь не найден' });
         }
         
         const valid = await bcrypt.compare(password, user.password_hash);
         if (!valid) {
-            console.log('❌ Неверный пароль для:', username);
             return res.status(400).json({ error: 'Неверный пароль' });
         }
         
         const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
         
+        // Отправляем токен и в куке, и в теле ответа
         res.cookie('token', token, {
             httpOnly: true,
             maxAge: 7 * 24 * 60 * 60 * 1000,
@@ -206,14 +204,13 @@ app.post('/api/login', async (req, res) => {
             path: '/'
         });
         
-        console.log('✅ Успешный вход:', username);
-        res.json({ success: true, username });
+        // ВОЗВРАЩАЕМ ТОКЕН В ТЕЛЕ ОТВЕТА
+        res.json({ success: true, username, token });
     } catch (err) {
         console.error('❌ Ошибка входа:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
-
 // ПРОВЕРКА АВТОРИЗАЦИИ
 app.get('/api/me', (req, res) => {
     const token = req.cookies.token;
