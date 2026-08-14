@@ -592,4 +592,106 @@ resetConfirmBtn.addEventListener('click', async () => {
 
 // ==================== ЗАПУСК ====================
 console.log('🚀 Запуск мессенджера...');
+
+
+// ==================== ВЕРИФИКАЦИЯ EMAIL ====================
+
+const verifySection = document.getElementById('verify-section');
+const verifyCode = document.getElementById('verify-code');
+const verifyBtn = document.getElementById('verify-btn');
+const resendCodeBtn = document.getElementById('resend-code-btn');
+let pendingUsername = null;
+
+// После успешной регистрации показываем поле для кода
+document.getElementById('register-btn').addEventListener('click', async () => {
+    const username = document.getElementById('register-username').value;
+    const password = document.getElementById('register-password').value;
+    const email = document.getElementById('register-email').value;
+    
+    if (!username || !password || !email) {
+        showAuthError('Заполните все поля');
+        return;
+    }
+    
+    if (!email.includes('@')) {
+        showAuthError('Введите корректный email');
+        return;
+    }
+    
+    try {
+        const res = await fetch(SERVER_URL + '/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, email }),
+            credentials: 'include'
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            pendingUsername = username;
+            verifySection.style.display = 'block';
+            showAuthError('✅ Код отправлен на почту! Введите его для подтверждения.');
+            document.getElementById('register-btn').disabled = true;
+        } else {
+            showAuthError('❌ ' + (data.error || 'Ошибка регистрации'));
+        }
+    } catch (err) {
+        console.error('❌ Ошибка регистрации:', err);
+        showAuthError('❌ Ошибка подключения к серверу');
+    }
+});
+
+// Подтверждение email
+verifyBtn.addEventListener('click', async () => {
+    const code = verifyCode.value.trim();
+    if (!code || !pendingUsername) {
+        showAuthError('Введите код');
+        return;
+    }
+    
+    try {
+        const res = await fetch(SERVER_URL + '/api/verify-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: pendingUsername, code }),
+            credentials: 'include'
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            showAuthError('✅ Email подтверждён! Теперь войдите.');
+            verifySection.style.display = 'none';
+            document.getElementById('register-btn').disabled = false;
+            showLoginForm();
+        } else {
+            showAuthError('❌ ' + (data.error || 'Ошибка подтверждения'));
+        }
+    } catch {
+        showAuthError('❌ Ошибка подключения к серверу');
+    }
+});
+
+// Повторная отправка кода
+resendCodeBtn.addEventListener('click', async () => {
+    if (!pendingUsername) return;
+    
+    try {
+        const res = await fetch(SERVER_URL + '/api/resend-verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: pendingUsername }),
+            credentials: 'include'
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            showAuthError('✅ Новый код отправлен на почту!');
+        } else {
+            showAuthError('❌ ' + (data.error || 'Ошибка'));
+        }
+    } catch {
+        showAuthError('❌ Ошибка подключения к серверу');
+    }
+});
+
 checkAuth();
