@@ -26,9 +26,16 @@
                 <h2>Регистрация</h2>
                 <input type="text" id="register-username" placeholder="Логин">
                 <input type="password" id="register-password" placeholder="Пароль">
-                <input type="email" id="register-email" placeholder="Email (для восстановления)">
+                <input type="email" id="register-email" placeholder="Email (для подтверждения)">
+                <div id="verify-section" style="display:none">
+                    <p>Введите код из письма:</p>
+                    <input type="text" id="verify-code" placeholder="Код подтверждения">
+                    <button id="verify-btn">Подтвердить email</button>
+                    <button id="resend-code-btn">Отправить код повторно</button>
+                </div>
                 <button id="register-btn">Зарегистрироваться</button>
                 <p>Уже есть аккаунт? <a href="#" id="show-login">Войти</a></p>
+                <div id="auth-error" class="error-message"></div>
             </div>
 
             
