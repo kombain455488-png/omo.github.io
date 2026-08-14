@@ -190,9 +190,10 @@ function connectSocket() {
     });
     
     socket.on('chat message', (msg) => {
-        console.log('📩 Получено сообщение:', msg);
-        renderMessage(msg, false);
-    });
+    console.log('📩 Получено сообщение:', msg);
+    // Показываем все сообщения, которые пришли от сервера
+    renderMessage(msg, msg.username === currentUser);
+});
     
     socket.on('chat history', (messages) => {
         chatHistory = messages;
@@ -486,14 +487,10 @@ function sendMessage() {
     
     console.log('📤 Отправляю сообщение в чат', currentChatId, ':', text);
     
+    // Отправляем на сервер — сервер сам разошлёт всем
     socket.emit('chat message', { chatId: currentChatId, message: text });
     
-    renderMessage({
-        username: currentUser,
-        text: text,
-        timestamp: Math.floor(Date.now() / 1000)
-    }, true);
-    
+    // НЕ рендерим здесь — ждём ответ от сервера
     messageInput.value = '';
 }
 
