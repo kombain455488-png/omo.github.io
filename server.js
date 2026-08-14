@@ -26,11 +26,13 @@ const db = new sqlite3.Database(dbPath);
 db.serialize(() => {
     console.log('🔄 Создаю таблицы...');
     
-    // ============ ТАБЛИЦА USERS (с email) ============
     db.run(`CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password_hash TEXT NOT NULL,
         email TEXT,
+        verified INTEGER DEFAULT 0,
+        verify_code TEXT,
+        verify_code_expires INTEGER,
         reset_code TEXT,
         reset_code_expires INTEGER
     )`, (err) => {
@@ -159,14 +161,18 @@ function getOneQuery(sql, params = []) {
 
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 
-// РЕГИСТРАЦИЯ (с email)
+// РЕГИСТРАЦИЯ (с email и верификацией)
 app.post('/api/register', async (req, res) => {
     const { username, password, email } = req.body;
     
     console.log('📝 Попытка регистрации:', username, email);
     
-    if (!username || !password) {
-        return res.status(400).json({ error: 'Логин и пароль обязательны' });
+    if (!username || !password || !email) {
+        return res.status(400).json({ error: 'Все поля обязательны' });
+    }
+    
+    if (!email.includes('@')) {
+        return res.status(400).json({ error: 'Неверный email' });
     }
     
     try {
@@ -175,22 +181,125 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ error: 'Пользователь уже существует' });
         }
         
+        const emailExists = await getOneQuery('SELECT username FROM users WHERE email = ?', [email]);
+        if (emailExists) {
+            return res.status(400).json({ error: 'Этот email уже используется' });
+        }
+        
         const passwordHash = await bcrypt.hash(password, 10);
+        const verifyCode = Math.floor(10000 + Math.random() * 90000).toString();
+        const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 час
         
         await runQuery(
-            'INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)',
-            [username, passwordHash, email || null]
+            'INSERT INTO users (username, password_hash, email, verified, verify_code, verify_code_expires) VALUES (?, ?, ?, 0, ?, ?)',
+            [username, passwordHash, email, verifyCode, expiresAt]
         );
         
-        console.log('✅ Пользователь создан:', username);
-        res.json({ success: true, message: 'Регистрация успешна' });
+        // Отправляем код на email
+        const mailOptions = {
+            from: 'noreply@messenger.com',
+            to: email,
+            subject: 'Подтверждение регистрации в Мессенджере',
+            text: `Ваш код подтверждения: ${verifyCode}\nКод действителен 1 час.`
+        };
+        
+        await transporter.sendMail(mailOptions);
+        console.log(`📧 Код подтверждения отправлен на ${email}: ${verifyCode}`);
+        
+        res.json({ 
+            success: true, 
+            message: 'Код подтверждения отправлен на email',
+            username 
+        });
     } catch (err) {
         console.error('❌ Ошибка регистрации:', err);
         res.status(500).json({ error: 'Ошибка сервера' });
     }
 });
 
-// ВХОД
+// ПОДТВЕРЖДЕНИЕ EMAIL
+app.post('/api/verify-email', async (req, res) => {
+    const { username, code } = req.body;
+    
+    if (!username || !code) {
+        return res.status(400).json({ error: 'Все поля обязательны' });
+    }
+    
+    try {
+        const user = await getOneQuery(
+            'SELECT username, verify_code, verify_code_expires FROM users WHERE username = ? AND verified = 0',
+            [username]
+        );
+        
+        if (!user) {
+            return res.status(400).json({ error: 'Пользователь не найден или уже подтверждён' });
+        }
+        
+        if (user.verify_code !== code) {
+            return res.status(400).json({ error: 'Неверный код' });
+        }
+        
+        if (user.verify_code_expires < Math.floor(Date.now() / 1000)) {
+            return res.status(400).json({ error: 'Код истёк. Запросите новый' });
+        }
+        
+        await runQuery(
+            'UPDATE users SET verified = 1, verify_code = NULL, verify_code_expires = NULL WHERE username = ?',
+            [username]
+        );
+        
+        console.log(`✅ Email подтверждён для ${username}`);
+        res.json({ success: true, message: 'Email подтверждён!' });
+    } catch (err) {
+        console.error('❌ Ошибка верификации:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// ПОВТОРНАЯ ОТПРАВКА КОДА
+app.post('/api/resend-verify', async (req, res) => {
+    const { username } = req.body;
+    
+    try {
+        const user = await getOneQuery(
+            'SELECT email, verified FROM users WHERE username = ?',
+            [username]
+        );
+        
+        if (!user) {
+            return res.status(400).json({ error: 'Пользователь не найден' });
+        }
+        
+        if (user.verified === 1) {
+            return res.status(400).json({ error: 'Email уже подтверждён' });
+        }
+        
+        const verifyCode = Math.floor(10000 + Math.random() * 90000).toString();
+        const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+        
+        await runQuery(
+            'UPDATE users SET verify_code = ?, verify_code_expires = ? WHERE username = ?',
+            [verifyCode, expiresAt, username]
+        );
+        
+        const mailOptions = {
+            from: 'noreply@messenger.com',
+            to: user.email,
+            subject: 'Подтверждение регистрации в Мессенджере',
+            text: `Ваш новый код подтверждения: ${verifyCode}\nКод действителен 1 час.`
+        };
+        
+        await transporter.sendMail(mailOptions);
+        console.log(`📧 Новый код отправлен на ${user.email}: ${verifyCode}`);
+        
+        res.json({ success: true, message: 'Новый код отправлен' });
+    } catch (err) {
+        console.error('❌ Ошибка повторной отправки:', err);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// ВХОД (проверяем верификацию)
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
@@ -201,9 +310,21 @@ app.post('/api/login', async (req, res) => {
     }
     
     try {
-        const user = await getOneQuery('SELECT username, password_hash FROM users WHERE username = ?', [username]);
+        const user = await getOneQuery(
+            'SELECT username, password_hash, verified FROM users WHERE username = ?',
+            [username]
+        );
+        
         if (!user) {
             return res.status(400).json({ error: 'Пользователь не найден' });
+        }
+        
+        if (user.verified === 0) {
+            return res.status(400).json({ 
+                error: 'Email не подтверждён. Проверьте почту или запросите новый код.',
+                needVerification: true,
+                username 
+            });
         }
         
         const valid = await bcrypt.compare(password, user.password_hash);
@@ -261,7 +382,7 @@ app.post('/api/logout', (req, res) => {
 
 // ==================== ВОССТАНОВЛЕНИЕ ПАРОЛЯ ====================
 
-// ЗАПРОС ВОССТАНОВЛЕНИЯ (отправляем код на email)
+// ЗАПРОС ВОССТАНОВЛЕНИЯ
 app.post('/api/forgot-password', async (req, res) => {
     const { email } = req.body;
     
@@ -275,16 +396,14 @@ app.post('/api/forgot-password', async (req, res) => {
             return res.status(404).json({ error: 'Пользователь с таким email не найден' });
         }
         
-        // Генерируем 6-значный код
         const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 час
+        const expiresAt = Math.floor(Date.now() / 1000) + 3600;
         
         await runQuery(
             'UPDATE users SET reset_code = ?, reset_code_expires = ? WHERE email = ?',
             [resetCode, expiresAt, email]
         );
         
-        // Отправляем email
         const mailOptions = {
             from: 'noreply@messenger.com',
             to: email,
@@ -293,7 +412,7 @@ app.post('/api/forgot-password', async (req, res) => {
         };
         
         await transporter.sendMail(mailOptions);
-        console.log(`📧 Код отправлен на ${email}: ${resetCode}`);
+        console.log(`📧 Код восстановления отправлен на ${email}: ${resetCode}`);
         
         res.json({ success: true, message: 'Код отправлен на email' });
     } catch (err) {
@@ -302,7 +421,7 @@ app.post('/api/forgot-password', async (req, res) => {
     }
 });
 
-// ПРОВЕРКА КОДА И СМЕНА ПАРОЛЯ
+// СМЕНА ПАРОЛЯ
 app.post('/api/reset-password', async (req, res) => {
     const { email, code, newPassword } = req.body;
     
@@ -345,7 +464,7 @@ app.get('/api/admin/users', async (req, res) => {
             return res.status(403).json({ error: 'Доступ запрещён' });
         }
         
-        const users = await getQuery('SELECT username, email FROM users ORDER BY username');
+        const users = await getQuery('SELECT username, email, verified FROM users ORDER BY username');
         const chats = await getQuery('SELECT id, name, creator FROM chats ORDER BY id DESC');
         const messages = await getQuery('SELECT COUNT(*) as total FROM messages');
         
@@ -362,7 +481,6 @@ app.get('/api/admin/users', async (req, res) => {
 
 // ==================== ЧАТЫ ====================
 
-// ПОЛУЧИТЬ СПИСОК ЧАТОВ
 app.get('/api/chats', async (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
@@ -395,7 +513,6 @@ app.get('/api/chats', async (req, res) => {
     }
 });
 
-// СОЗДАТЬ НОВЫЙ ЧАТ
 app.post('/api/chats', async (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
@@ -474,7 +591,6 @@ app.get('/api/users/search', async (req, res) => {
     }
 });
 
-// ДОБАВИТЬ ПОЛЬЗОВАТЕЛЯ В ЧАТ
 app.post('/api/chats/:chatId/members', async (req, res) => {
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ error: 'Не авторизован' });
